@@ -111,16 +111,18 @@ cam_matrix = np.array([[ 0.87490918, -0.24637599,  0.41693261,  0.63666708],
 
 # create mask mesh
 mask_meshes = fusion.create_instance_mask_mesh(vertices, triangles, out)
-for mask_mesh in mask_meshes:
-    mask_scene = trimesh.Scene(mask_mesh, camera=cam, camera_transform=cam_matrix)
-    mask_scene.show()
+for i, mask_mesh in enumerate(mask_meshes):
+    mask_mesh.export(f'mask_mesh_{i}_{scene}.ply')
+    print(f'Saved mask mesh {i} to mask_mesh_{i}_{scene}.ply')
 
 # create feature mesh
 feature_mesh = fusion.create_descriptor_mesh(vertices, triangles, out, {'pca': pca}, mask_out_bg=True)
-feature_scene = trimesh.Scene(feature_mesh, camera=cam, camera_transform=cam_matrix)
-feature_scene.show()
+feature_mesh.export(f'feature_mesh_{scene}.ply')
+print(f'Saved feature mesh to feature_mesh_{scene}.ply')
 
 # create color mesh
 color_mesh = fusion.create_color_mesh(vertices, triangles, out)
-color_scene = trimesh.Scene(color_mesh, camera=cam, camera_transform=cam_matrix)
-color_scene.show()
+color_mesh.export(f'color_mesh_{scene}.ply')
+print(f'Saved color mesh to color_mesh_{scene}.ply')
+
+print(f'All meshes saved for scene: {scene}')
