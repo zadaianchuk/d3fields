@@ -322,7 +322,7 @@ def voxel_downsample(pcd, voxel_size, pcd_color=None):
     else:
         return np.asarray(pcd_down.points)
 
-def aggr_point_cloud_from_data(colors, depths, Ks, poses, downsample=True, masks=None, boundaries=None, out_o3d=True):
+def aggr_point_cloud_from_data(colors, depths, Ks, poses, downsample=True, masks=None, boundaries=None, out_o3d=True, is_data_from_adamanip=False):
     # colors: [N, H, W, 3] numpy array in uint8
     # depths: [N, H, W] numpy array in meters
     # Ks: [N, 3, 3] numpy array
@@ -343,11 +343,15 @@ def aggr_point_cloud_from_data(colors, depths, Ks, poses, downsample=True, masks
         K = Ks[i]
         cam_param = [K[0,0], K[1,1], K[0,2], K[1,2]] # fx, fy, cx, cy
         if masks is None:
-            mask = (depth > 0) & (depth < 1.5)
+            if is_data_from_adamanip:
+                th = 2.5
+            else: 
+                th = 1.5
+            mask = (depth > 0) & (depth < th)
         else:
             mask = masks[i] & (depth > 0)
         # mask = np.ones_like(depth, dtype=bool)
-        pcd = depth2fgpcd(depth, mask, cam_param)
+        pcd = depth2fgpcd(depth, mask, cam_param, is_data_from_adamanip)
         
         pose = poses[i]
         pose = np.linalg.inv(pose)

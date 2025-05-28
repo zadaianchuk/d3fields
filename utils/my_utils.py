@@ -519,7 +519,7 @@ def opengl2cam(pcd, cam_extrinsic, global_scale):
     # print()
     return cam
 
-def depth2fgpcd(depth, mask, cam_params):
+def depth2fgpcd(depth, mask, cam_params, is_data_from_adamanip=False):
     # depth: (h, w)
     # fgpcd: (n, 3)
     # mask: (h, w)
@@ -531,9 +531,14 @@ def depth2fgpcd(depth, mask, cam_params):
     pos_x, pos_y = np.meshgrid(np.arange(w), np.arange(h))
     pos_x = pos_x[mask]
     pos_y = pos_y[mask]
-    fgpcd[:, 0] = (pos_x - cx) * depth[mask] / fx
-    fgpcd[:, 1] = (pos_y - cy) * depth[mask] / fy
-    fgpcd[:, 2] = depth[mask]
+    if is_data_from_adamanip:
+        fgpcd[:, 0] = (pos_x - cx) * depth[mask] / fx
+        fgpcd[:, 1] = - (pos_y - cy) * depth[mask] / fy
+        fgpcd[:, 2] = -depth[mask]
+    else:
+        fgpcd[:, 0] = (pos_x - cx) * depth[mask] / fx
+        fgpcd[:, 1] = (pos_y - cy) * depth[mask] / fy
+        fgpcd[:, 2] = depth[mask]
     return fgpcd
 
 def pcd2pix(pcd, cam_params, offset=(0, 0)):

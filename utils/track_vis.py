@@ -104,7 +104,6 @@ class TrackVis():
             
             self.vis.poll_events()
             self.vis.update_renderer()
-            self.vis.run()
             self.vis.capture_screen_image(f"{self.o3d_path}/{self.t:06}.png")
         
             if self.t == 0:
@@ -130,10 +129,7 @@ class TrackVis():
                         w_idx * int(self.W * self.imshow_ratio):(w_idx + 1) * int(self.W * self.imshow_ratio)] = \
                             cv2.resize(vis_img, (int(self.W * self.imshow_ratio), int(self.H * self.imshow_ratio)), interpolation=cv2.INTER_AREA)
         
-        cv2.imshow('merge_img', merge_img)
+        cv2.imwrite(f"{self.output_dir}/tracking_frame_{self.t:06d}.png", merge_img)
         self.vid.write(merge_img)
         
-        key = cv2.waitKey(1)
-        if key == ord('q'):
-            cv2.destroyAllWindows()
         self.t += 1

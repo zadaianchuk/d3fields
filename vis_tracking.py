@@ -14,6 +14,10 @@ from fusion import Fusion
 from utils.draw_utils import aggr_point_cloud_from_data
 from utils.track_vis import TrackVis
 
+# Create output directory
+output_dir = 'output'
+os.makedirs(output_dir, exist_ok=True)
+
 fusion = Fusion(num_cam=4)
 
 num_cam = 4
@@ -39,7 +43,7 @@ kypts_boundaries = {'x_lower': x_lower,
                     'z_lower': -0.2,
                     'z_upper': -0.02,}
 
-vis_o3d = True
+vis_o3d = False  # Set to False for headless operation
 
 def gen_dense_kypts(data_path, src_feat_info):
     colors = np.stack([cv2.imread(os.path.join(data_path, f'camera_{i}', 'color', f'0.png')) for i in range(num_cam)], axis=0)# [N, H, W, C]
@@ -59,8 +63,8 @@ def gen_dense_kypts(data_path, src_feat_info):
     query_thresholds = [src_feat_info[k]['params']['sam_threshold'] for k in query_texts]
 
     # create output dir
-    full_pts_path = os.path.join(data_path, 'obj_kypts') # list of (ptcl_num, 3) for each push, indexed by push_num
-    os.system(f'mkdir -p {full_pts_path}')
+    full_pts_path = os.path.join(output_dir, 'obj_kypts')  # Use output directory
+    os.makedirs(full_pts_path, exist_ok=True)  # Use os.makedirs instead of os.system
     
     track_vis = TrackVis(poses=extrinsics, Ks=intrinsics, output_dir=full_pts_path, vis_o3d=vis_o3d)
     
@@ -143,4 +147,7 @@ if __name__ == '__main__':
             {'params': {'sam_threshold': 0.6},
             'src_feats_path': None},
     }
-    gen_dense_kypts('data/2023-09-14-17-06-38-562096', src_feat_info)
+    data_path = 'data/2023-09-14-17-06-38-562096'
+    print(f'Processing tracking for {data_path}')
+    print(f'Output will be saved to: output/obj_kypts/')
+    gen_dense_kypts(data_path, src_feat_info)
