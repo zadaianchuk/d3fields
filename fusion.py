@@ -49,8 +49,8 @@ def project_points_coords(pts, Rt, K):
     pts_cam = H[:,None,:,:] @ hpts[None,:,:,None]
     pts_cam = pts_cam[:,:,:3,0]
     depth = pts_cam[:,:,2:]
-    invalid_mask = torch.abs(depth)<1e-4
-    depth[invalid_mask] = 1e-3
+    invalid_mask = torch.abs(depth)>2.499
+    # depth[invalid_mask] = 1e-3
     pts_2d = pts_cam[:,:,:2]/depth
     return pts_2d, ~(invalid_mask[...,0]), depth
 
@@ -200,10 +200,10 @@ def rm_mask_close_to_pcd(depth, mask, pcd, K, pose):
     return mask
 
 class Fusion():
-    def __init__(self, num_cam, feat_backbone='dinov2', device='cuda:0', dtype=torch.float32):
+    def __init__(self, num_cam, feat_backbone='dinov2', device='cuda:0', dtype=torch.float32, is_data_from_adamanip=False):
         self.device = device
         self.dtype = dtype
-        
+        self.is_data_from_adamanip = is_data_from_adamanip
         # hyper-parameters
         self.mu = 0.02
         
@@ -216,7 +216,7 @@ class Fusion():
         self.H = -1
         self.W = -1
         self.num_cam = num_cam
-        
+
         # dino feature extractor
         self.feat_backbone = feat_backbone
         if self.feat_backbone == 'dinov2':
@@ -324,7 +324,12 @@ class Fusion():
         pts_depth = pts_depth[...,0] # [rfn,pn]
         
         # get interpolated depth and features
-        inter_depth = interpolate_feats(self.curr_obs_torch['depth'].unsqueeze(1),
+        if self.is_data_from_adamanip:
+            depth_multiplier = -1
+
+        else:
+            depth_multiplier = 1
+        inter_depth = interpolate_feats(depth_multiplier * self.curr_obs_torch['depth'].unsqueeze(1),
                                         pts_2d,
                                         h = self.H,
                                         w = self.W,
@@ -340,8 +345,8 @@ class Fusion():
         #                                 inter_mode='bilinear') # [rfn,pn,3]
         
         # compute the distance to the closest point on the surface
-        dist = inter_depth - pts_depth # [rfn,pn]
-        dist_valid = (inter_depth > 0.0) & valid_mask & (dist > -self.mu) # [rfn,pn]
+        dist = depth_multiplier * (inter_depth - pts_depth) # [rfn,pn]
+        dist_valid = (inter_depth < 2.5) & valid_mask & (dist > -self.mu) # [rfn,pn]
         
         # distance-based weight
         dist_weight = torch.exp(torch.clamp(self.mu-torch.abs(dist), max=0) / self.mu) # [rfn,pn]
@@ -1273,7 +1278,7 @@ class Fusion():
         pose = self.curr_obs_torch['pose'].detach().cpu().numpy() # [num_cam, 3, 4]
         pad = np.tile(np.array([[[0,0,0,1]]]), [pose.shape[0], 1, 1])
         pose = np.concatenate([pose, pad], axis=1)
-        pcd, _ = aggr_point_cloud_from_data(color, depth, K, pose, downsample=False, masks=sel_mask, out_o3d=False, boundaries=boundaries)
+        pcd, _ = aggr_point_cloud_from_data(color, depth, K, pose, downsample=False, masks=sel_mask, out_o3d=False, boundaries=boundaries, is_data_from_adamanip=self.is_data_from_adamanip)
         return pcd
     
     def extract_masked_pcd_in_views(self, inst_idx_ls, view_idx_ls, boundaries, downsample=True):
@@ -1293,7 +1298,7 @@ class Fusion():
             sel_mask[view_idx] = (cv2.erode((sel_mask[view_idx] * 255).astype(np.uint8), np.ones([2, 2], np.uint8), iterations=1) / 255).astype(bool)
         pad = np.tile(np.array([[[0,0,0,1]]]), [pose.shape[0], 1, 1])
         pose = np.concatenate([pose, pad], axis=1)
-        pcd, _ = aggr_point_cloud_from_data(color, depth, K, pose, downsample=downsample, masks=sel_mask, out_o3d=False, boundaries=boundaries)
+        pcd, _ = aggr_point_cloud_from_data(color, depth, K, pose, downsample=downsample, masks=sel_mask, out_o3d=False, boundaries=boundaries, is_data_from_adamanip=self.is_data_from_adamanip)
         return pcd
     
     def get_query_obj_pcd(self):
@@ -1307,7 +1312,7 @@ class Fusion():
         pose = self.curr_obs_torch['pose'].detach().cpu().numpy() # [num_cam, 3, 4]
         pad = np.tile(np.array([[[0,0,0,1]]]), [pose.shape[0], 1, 1])
         pose = np.concatenate([pose, pad], axis=1)
-        pcd = aggr_point_cloud_from_data(color, depth, K, pose, downsample=False, masks=mask)
+        pcd = aggr_point_cloud_from_data(color, depth, K, pose, downsample=False, masks=mask, is_data_from_adamanip=self.is_data_from_adamanip)
         return pcd
     
     def extract_mesh(self, pts, res, grid_shape):
