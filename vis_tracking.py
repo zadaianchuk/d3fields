@@ -49,7 +49,7 @@ def gen_dense_kypts(data_path, src_feat_info):
     colors = np.stack([cv2.imread(os.path.join(data_path, f'camera_{i}', 'color', f'0.png')) for i in range(num_cam)], axis=0)# [N, H, W, C]
     depths = np.stack([cv2.imread(os.path.join(data_path, f'camera_{i}', 'depth', f'0.png'), cv2.IMREAD_ANYDEPTH) for i in range(num_cam)], axis=0) / 1000. # [N, H, W]
 
-    extrinsics = np.stack([np.load(os.path.join(data_path, f'camera_{i}', 'camera_extrinsics.npy')) for i in range(num_cam)])
+    extrinsics = np.stack([np.load(os.path.join(data_path, f'camera_{i}', 'camera_extrinsics.npy')).T for i in range(num_cam)])
     cam_param = np.stack([np.load(os.path.join(data_path, f'camera_{i}', 'camera_params.npy')) for i in range(num_cam)])
     intrinsics = np.zeros((num_cam, 3, 3))
     intrinsics[:, 0, 0] = cam_param[:, 0]

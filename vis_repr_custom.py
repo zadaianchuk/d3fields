@@ -44,7 +44,7 @@ def main(data_path,
 
     H, W = colors.shape[1:3]
 
-    extrinsics = np.stack([np.load(os.path.join(data_path, f'camera_{i}', 'camera_extrinsics.npy')) for i in range(num_cam)])
+    extrinsics = np.stack([np.load(os.path.join(data_path, f'camera_{i}', 'camera_extrinsics.npy')).T for i in range(num_cam)])
     cam_param = np.stack([np.load(os.path.join(data_path, f'camera_{i}', 'camera_params.npy')) for i in range(num_cam)])
     intrinsics = np.zeros((num_cam, 3, 3))
     intrinsics[:, 0, 0] = cam_param[:, 0]

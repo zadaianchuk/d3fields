@@ -33,7 +33,7 @@ z_upper = 0.02
 z_lower = -0.2
 
 
-scene = 'open_safe' # 'mug', 'fork', 'shoe'
+scene = 'open_bottle' # 'mug', 'fork', 'shoe'
 if scene == 'mug':
     data_path = 'data/2023-09-15-13-21-56-171587' # mug
     pca_path = 'pca_model/mug.pkl'
@@ -55,18 +55,25 @@ elif scene == 'open_safe':
     query_texts = ['safe', "robotic arm"]
     query_thresholds = [0.25]
     is_data_from_adamanip = True
-    
-    t = 10
+elif scene == 'open_bottle':
+    data_path = '/ssdstore/azadaia/project_snellius_sync/AdaManip/d3fields_datasets/rgbd_grasp_OpenBottle_7_eps1_clock0.5_env0/'
+    pca_path = 'pca_model/mug.pkl'
+    query_texts = ['bottle', "end effector"]
+    query_thresholds = [0.25]
+    is_data_from_adamanip = True
+
+if is_data_from_adamanip:
+    t = 5
     num_cam = 2
 
     step = 0.01
 
     x_upper = 1
     x_lower = -1
-    y_upper = 1
+    y_upper =1
     y_lower = -1
     z_upper = 1
-    z_lower = -1
+    z_lower = 0.1
     
         
 boundaries = {'x_lower': x_lower,
@@ -78,15 +85,14 @@ boundaries = {'x_lower': x_lower,
 
 pca = pickle.load(open(pca_path, 'rb'))
 
-fusion = Fusion(num_cam=num_cam, feat_backbone='dinov2')
+fusion = Fusion(num_cam=num_cam, feat_backbone='dinov2', is_data_from_adamanip=is_data_from_adamanip)
 
 colors = np.stack([cv2.imread(os.path.join(data_path, f'camera_{i}', 'color', f'{t}.png')) for i in range(num_cam)], axis=0) # [N, H, W, C]
 depths = np.stack([cv2.imread(os.path.join(data_path, f'camera_{i}', 'depth', f'{t}.png'), cv2.IMREAD_ANYDEPTH) for i in range(num_cam)], axis=0) / 1000. # [N, H, W]
 
 H, W = colors.shape[1:3]
 
-extrinsics = np.stack([np.load(os.path.join(data_path, f'camera_{i}', 'camera_extrinsics.npy')).T for i in range(num_cam)])
-
+extrinsics = np.stack([(np.load(os.path.join(data_path, f'camera_{i}', 'camera_extrinsics.npy')).T) for i in range(num_cam)])
 cam_param = np.stack([np.load(os.path.join(data_path, f'camera_{i}', 'camera_params.npy')) for i in range(num_cam)])
 print("cam_param: ", cam_param)
 intrinsics = np.zeros((num_cam, 3, 3))
@@ -96,6 +102,8 @@ intrinsics[:, 0, 2] = cam_param[:, 2]
 intrinsics[:, 1, 2] = cam_param[:, 3]
 intrinsics[:, 2, 2] = 1
 
+assert np.all(extrinsics[:, -1] == np.array([[0,0,0,1]]))
+
 obs = {
     'color': colors,
     'depth': depths,
@@ -103,18 +111,18 @@ obs = {
     'K': intrinsics,
 }
 
-pcd = aggr_point_cloud_from_data(colors[..., ::-1], 
-                                 depths, 
-                                 intrinsics, 
-                                 extrinsics, 
-                                 downsample=True, 
-                                 boundaries=boundaries, 
-                                 is_data_from_adamanip=is_data_from_adamanip)
+# pcd = aggr_point_cloud_from_data(colors[..., ::-1], 
+#                                  depths, 
+#                                  intrinsics, 
+#                                  extrinsics, 
+#                                  downsample=True, 
+#                                  boundaries=boundaries, 
+#                                  is_data_from_adamanip=is_data_from_adamanip)
 
-pcd.remove_statistical_outlier(nb_neighbors=5, std_ratio=0.2)
+# pcd.remove_statistical_outlier(nb_neighbors=5, std_ratio=0.2)
 
 # save pcd
-o3d.io.write_point_cloud(f'{output_dir}/pcd_{scene}.ply', pcd)
+# o3d.io.write_point_cloud(f'{output_dir}/pcd_{scene}.ply', pcd)
 print(f'Saved pcd to {output_dir}/pcd_{scene}.ply')
 
 
@@ -122,51 +130,51 @@ print(f'Saved pcd to {output_dir}/pcd_{scene}.ply')
 ##TODO: fix fusion
 ##ideas some meshes look weird, maybe because they are not connected
 
-# fusion.update(obs)
-# fusion.text_queries_for_inst_mask_no_track(query_texts, query_thresholds, boundaries=boundaries)
+fusion.update(obs)
+fusion.text_queries_for_inst_mask_no_track(query_texts, query_thresholds, boundaries=boundaries)
 
-# ### 3D vis
-# device = 'cuda'
+### 3D vis
+device = 'cuda'
 
-# # visualize mesh
-# init_grid, grid_shape = create_init_grid(boundaries, step)
-# init_grid = init_grid.to(device=device, dtype=torch.float32)
+# visualize mesh
+init_grid, grid_shape = create_init_grid(boundaries, step)
+init_grid = init_grid.to(device=device, dtype=torch.float32)
 
-# print('eval init grid')
-# with torch.no_grad():
-#     out = fusion.batch_eval(init_grid, return_names=[])
+print('eval init grid')
+with torch.no_grad():
+    out = fusion.batch_eval(init_grid, return_names=[])
 
-# # extract mesh
-# print('extract mesh')
-# vertices, triangles = fusion.extract_mesh(init_grid, out, grid_shape)
+# extract mesh
+print('extract mesh')
+vertices, triangles = fusion.extract_mesh(init_grid, out, grid_shape)
 
-# # eval mask and feature of vertices
-# vertices_tensor = torch.from_numpy(vertices).to(device, dtype=torch.float32)
-# print('eval mesh vertices')
-# with torch.no_grad():
-#     out = fusion.batch_eval(vertices_tensor, return_names=['dino_feats', 'mask', 'color_tensor'])
+# eval mask and feature of vertices
+vertices_tensor = torch.from_numpy(vertices).to(device, dtype=torch.float32)
+print('eval mesh vertices')
+with torch.no_grad():
+    out = fusion.batch_eval(vertices_tensor, return_names=['dino_feats', 'mask', 'color_tensor'])
 
-# cam = trimesh.scene.Camera(resolution=(1920, 1043), fov=(60, 60))
+cam = trimesh.scene.Camera(resolution=(1920, 1043), fov=(60, 60))
 
-# cam_matrix = np.array([[ 0.87490918, -0.24637599,  0.41693261,  0.63666708],
-#                        [-0.44229374, -0.75717002,  0.4806972,   0.66457463],
-#                        [ 0.19725663, -0.60497308, -0.77142556, -1.16125645],
-#                        [ 0.        , -0.        , -0.        ,  1.        ]])
+cam_matrix = np.array([[ 0.87490918, -0.24637599,  0.41693261,  0.63666708],
+                       [-0.44229374, -0.75717002,  0.4806972,   0.66457463],
+                       [ 0.19725663, -0.60497308, -0.77142556, -1.16125645],
+                       [ 0.        , -0.        , -0.        ,  1.        ]])
 
-# # create mask mesh
-# mask_meshes = fusion.create_instance_mask_mesh(vertices, triangles, out)
-# for i, mask_mesh in enumerate(mask_meshes):
-#     mask_mesh.export(f'{output_dir}/mask_mesh_{i}_{scene}.ply')
-#     print(f'Saved mask mesh {i} to {output_dir}/mask_mesh_{i}_{scene}.ply')
+# create mask mesh
+mask_meshes = fusion.create_instance_mask_mesh(vertices, triangles, out)
+for i, mask_mesh in enumerate(mask_meshes):
+    mask_mesh.export(f'{output_dir}/mask_mesh_{i}_{scene}.ply')
+    print(f'Saved mask mesh {i} to {output_dir}/mask_mesh_{i}_{scene}.ply')
 
-# # create feature mesh
-# feature_mesh = fusion.create_descriptor_mesh(vertices, triangles, out, {'pca': pca}, mask_out_bg=True)
-# feature_mesh.export(f'{output_dir}/feature_mesh_{scene}.ply')
-# print(f'Saved feature mesh to {output_dir}/feature_mesh_{scene}.ply')
+# create feature mesh
+feature_mesh = fusion.create_descriptor_mesh(vertices, triangles, out, {'pca': pca}, mask_out_bg=True)
+feature_mesh.export(f'{output_dir}/feature_mesh_{scene}.ply')
+print(f'Saved feature mesh to {output_dir}/feature_mesh_{scene}.ply')
 
-# # create color mesh
-# color_mesh = fusion.create_color_mesh(vertices, triangles, out)
-# color_mesh.export(f'{output_dir}/color_mesh_{scene}.ply')
-# print(f'Saved color mesh to {output_dir}/color_mesh_{scene}.ply')
+# create color mesh
+color_mesh = fusion.create_color_mesh(vertices, triangles, out)
+color_mesh.export(f'{output_dir}/color_mesh_{scene}.ply')
+print(f'Saved color mesh to {output_dir}/color_mesh_{scene}.ply')
 
-# print(f'All meshes saved for scene: {scene}')
+print(f'All meshes saved for scene: {scene}')

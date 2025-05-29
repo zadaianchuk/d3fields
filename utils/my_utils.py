@@ -523,6 +523,7 @@ def depth2fgpcd(depth, mask, cam_params, is_data_from_adamanip=False):
     # depth: (h, w)
     # fgpcd: (n, 3)
     # mask: (h, w)
+    assert is_data_from_adamanip
     h, w = depth.shape
     mask = np.logical_and(mask, depth > 0)
     # mask = (depth <= 0.599/0.8)
