@@ -31,13 +31,73 @@ TASK_QUERIES = {
 
 # Default boundaries for the workspace (adjust based on your setup)
 DEFAULT_BOUNDARIES = {
-    'x_lower': -0.2, 'x_upper': 0.2,
-    'y_lower': -0.2, 'y_upper': 0.2,
-    'z_lower': -2, 'z_upper': 2
+    'x_lower': -1, 'x_upper': 1,
+    'y_lower': -1, 'y_upper': 1,
+    'z_lower': 0.1, 'z_upper': 0.5
 }
 
 # Default segmentation thresholds
 DEFAULT_THRESHOLDS = [0.25, 0.25]
+
+def infer_boundaries_and_step(point_clouds: dict, padding_ratio: float = 0.1, target_grid_points: int = 100000):
+    """
+    Infer workspace boundaries and step size from extracted point clouds.
+    
+    Args:
+        point_clouds: Dictionary of extracted point clouds {instance_name: numpy_array}
+        padding_ratio: Ratio of padding to add around the point cloud bounds
+        target_grid_points: Target number of grid points for step size calculation
+    
+    Returns:
+        tuple: (boundaries_dict, step_size)
+    """
+    if not point_clouds:
+        print("    Warning: No point clouds provided, using default boundaries")
+        return DEFAULT_BOUNDARIES, 0.05
+    
+    # Combine all point clouds
+    all_points = []
+    for pcd_np in point_clouds.values():
+        if len(pcd_np) > 0:
+            all_points.append(pcd_np)
+    
+    if not all_points:
+        print("    Warning: All point clouds are empty, using default boundaries")
+        return DEFAULT_BOUNDARIES, 0.05
+    
+    combined_points = np.concatenate(all_points, axis=0)
+    
+    # Compute bounds
+    min_coords = combined_points.min(axis=0)
+    max_coords = combined_points.max(axis=0)
+    
+    # Add padding
+    ranges = max_coords - min_coords
+    padding = ranges * padding_ratio
+    
+    boundaries = {
+        'x_lower': float(min_coords[0] - padding[0]),
+        'x_upper': float(max_coords[0] + padding[0]),
+        'y_lower': float(min_coords[1] - padding[1]),
+        'y_upper': float(max_coords[1] + padding[1]),
+        'z_lower': float(min_coords[2] - padding[2]),
+        'z_upper': float(max_coords[2] + padding[2])
+    }
+    
+    # Calculate step size based on target grid points
+    volume = (boundaries['x_upper'] - boundaries['x_lower']) * \
+             (boundaries['y_upper'] - boundaries['y_lower']) * \
+             (boundaries['z_upper'] - boundaries['z_lower'])
+    
+    step_size = (volume / target_grid_points) ** (1/3)
+    step_size = max(0.01, min(0.1, step_size))  # Clamp between 1cm and 10cm
+    
+    print(f"    Inferred boundaries: x=[{boundaries['x_lower']:.3f}, {boundaries['x_upper']:.3f}], "
+          f"y=[{boundaries['y_lower']:.3f}, {boundaries['y_upper']:.3f}], "
+          f"z=[{boundaries['z_lower']:.3f}, {boundaries['z_upper']:.3f}]")
+    print(f"    Inferred step size: {step_size:.3f}m")
+    
+    return boundaries, step_size
 
 # Base path for GT masks
 GT_MASK_BASE_PATH = "/ssdstore/azadaia/project_snellius_sync/d3fields/output/adamanip_d3fields"
@@ -170,7 +230,7 @@ def apply_gt_masks_to_fusion_simple(fusion, gt_masks):
     print(f"    Set mask tensor with shape: {mask_tensor.shape}")
 
 
-def create_meshes_and_save(fusion, output_dir: Path, task: str, environment: str, boundaries: dict, step_size: float = 0.1):
+def create_meshes_and_save(fusion, output_dir: Path, task: str, environment: str, point_clouds: dict = None, boundaries: dict = None, step_size: float = None):
     """
     Create and save 3D meshes (mask, feature, color) similar to vis_repr.py
     
@@ -179,10 +239,18 @@ def create_meshes_and_save(fusion, output_dir: Path, task: str, environment: str
         output_dir: Output directory
         task: Task name  
         environment: Environment name
-        boundaries: Workspace boundaries
-        step_size: Grid step size for mesh generation
+        point_clouds: Dictionary of extracted point clouds for boundary inference
+        boundaries: Workspace boundaries (None to infer from data)
+        step_size: Grid step size for mesh generation (None to infer from data)
     """
     print(f"    Creating 3D meshes...")
+    
+    # Infer boundaries and step size if not provided
+    if boundaries is None or step_size is None:
+        print("    Inferring boundaries and step size from point cloud data...")
+        inferred_boundaries, inferred_step = infer_boundaries_and_step(point_clouds or {})
+        boundaries = boundaries or inferred_boundaries
+        step_size = step_size or inferred_step
     
     device = fusion.device
     
@@ -254,6 +322,8 @@ def create_meshes_and_save(fusion, output_dir: Path, task: str, environment: str
     print(f"    Saved color mesh to {color_path}")
     
     print(f"    ✓ 3D mesh generation complete for {task}/{environment}")
+    
+    return boundaries, step_size  # Return the used boundaries and step size
 
 
 def create_point_cloud_ply_files(fusion, output_dir: Path, task: str, environment: str, boundaries: dict):
@@ -505,7 +575,7 @@ def process_environment(task: str, environment: str, output_dir: Path,
                     inst_mask_sum = mask[:, :, :, inst_id].sum()
                     print(f"    Debug: Instance {inst_id} mask sum: {inst_mask_sum}")
         
-        pcd = fusion.extract_masked_pcd([inst_id], DEFAULT_BOUNDARIES)
+        pcd = fusion.extract_masked_pcd([inst_id], None)
         print(f"    Extracted {pcd.shape[0]} points for instance {inst_id}")
         
         # If no points extracted, try fallback method
@@ -542,10 +612,12 @@ def process_environment(task: str, environment: str, output_dir: Path,
     # Create and save 3D meshes (mask, feature, color)
     try:
         # Use larger step size for faster processing and better mesh extraction
-        create_meshes_and_save(fusion, output_dir, task, environment, DEFAULT_BOUNDARIES, step_size=0.01)
+        used_boundaries, used_step_size = create_meshes_and_save(fusion, output_dir, task, environment, point_clouds=point_clouds, boundaries=None, step_size=None)
     except Exception as e:
         print(f"    Warning: Failed to create 3D meshes: {e}")
         print(f"    Error details: {traceback.format_exc()}")
+        # Fall back to inferred boundaries for other operations
+        used_boundaries, used_step_size = infer_boundaries_and_step(point_clouds or {})
     
     # Clean up fusion
     fusion.close()
@@ -575,7 +647,9 @@ def process_environment(task: str, environment: str, output_dir: Path,
         'queries': queries,
         'num_instances': num_instances,
         'num_cameras': obs['color'].shape[0],
-        'boundaries': DEFAULT_BOUNDARIES,
+        'boundaries': used_boundaries,  # Use inferred boundaries
+        'step_size': used_step_size,    # Use inferred step size
+        'default_boundaries': DEFAULT_BOUNDARIES,  # Keep default for reference
         'thresholds': DEFAULT_THRESHOLDS,
         'image_shape': obs['color'].shape[1:3],
         'features_info': features_info,

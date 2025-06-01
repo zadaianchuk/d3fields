@@ -50,7 +50,7 @@ def project_points_coords(pts, Rt, K):
     pts_cam = pts_cam[:,:,:3,0]
     depth = pts_cam[:,:,2:]
     invalid_mask = torch.abs(depth)>2.499
-    # depth[invalid_mask] = 1e-3
+    depth[invalid_mask] = 1e-3
     pts_2d = pts_cam[:,:,:2]/depth
     return pts_2d, ~(invalid_mask[...,0]), depth
 
@@ -320,7 +320,7 @@ class Fusion():
         assert pts.shape[1] == 3
         
         # transform pts to camera pixel coords and get the depth
-        pts_2d, valid_mask, pts_depth = project_points_coords(pts, self.curr_obs_torch['pose'], self.curr_obs_torch['K'])
+        pts_2d, valid_mask, pts_depth = project_points_coords(pts, self.curr_obs_torch['correct_pose'], self.curr_obs_torch['K'])
         pts_depth = pts_depth[...,0] # [rfn,pn]
         
         # get interpolated depth and features
@@ -336,34 +336,19 @@ class Fusion():
                                         padding_mode='zeros',
                                         align_corners=True,
                                         inter_mode='nearest')[...,0] # [rfn,pn,1]
-        # inter_normal = interpolate_feats(self.curr_obs_torch['normals'].permute(0,3,1,2),
-        #                                  pts_2d,
-        #                                 h = self.H,
-        #                                 w = self.W,
-        #                                 padding_mode='zeros',
-        #                                 align_corners=True,
-        #                                 inter_mode='bilinear') # [rfn,pn,3]
         
         # compute the distance to the closest point on the surface
         dist = depth_multiplier * (inter_depth - pts_depth) # [rfn,pn]
+        
+        #TODO (Andrii): check if this make sense
         dist_valid = (inter_depth < 2.5) & valid_mask & (dist > -self.mu) # [rfn,pn]
         
         # distance-based weight
         dist_weight = torch.exp(torch.clamp(self.mu-torch.abs(dist), max=0) / self.mu) # [rfn,pn]
         
-        # # normal-based weight
-        # fxfy = [torch.Tensor([self.curr_obs_torch['K'][i,0,0].item(), self.curr_obs_torch['K'][i,1,1].item()]) for i in range(self.num_cam)] # [rfn, 2]
-        # fxfy = torch.stack(fxfy, dim=0).to(self.device) # [rfn, 2]
-        # view_dir = pts_2d / fxfy[:, None, :] # [rfn,pn,2]
-        # view_dir = torch.cat([view_dir, torch.ones_like(view_dir[...,0:1])], dim=-1) # [rfn,pn,3]
-        # view_dir = view_dir / torch.norm(view_dir, dim=-1, keepdim=True) # [rfn,pn,3]
-        # dist_weight = torch.abs(torch.sum(view_dir * inter_normal, dim=-1)) # [rfn,pn]
-        # dist_weight = dist_weight * dist_valid.float() # [rfn,pn]
+
         
         dist = torch.clamp(dist, min=-self.mu, max=self.mu) # [rfn,pn]
-        
-        # # weighted distance
-        # dist = (dist * dist_weight).sum(0) / (dist_weight.sum(0) + 1e-6) # [pn]
         
         # valid-weighted distance
         dist = (dist * dist_valid.float()).sum(0) / (dist_valid.float().sum(0) + 1e-6) # [pn]
@@ -550,51 +535,6 @@ class Fusion():
         return outputs
     
     
-    # def extract_dist_vol(self, boundaries):
-    #     step = 0.002
-    #     init_grid, grid_shape = create_init_grid(boundaries, step)
-    #     init_grid = init_grid.to(self.device, dtype=torch.float32)
-        
-    #     batch_pts = 10000
-        
-    #     dist_vol = torch.zeros(init_grid.shape[0], dtype=torch.float32, device=self.device)
-    #     valid_mask = torch.zeros(init_grid.shape[0], dtype=torch.bool, device=self.device)
-        
-    #     for i in range(0, init_grid.shape[0], batch_pts):
-    #         st_idx = i
-    #         ed_idx = min(i + batch_pts, init_grid.shape[0])
-    #         out = self.eval(init_grid[st_idx:ed_idx], return_names={})
-            
-    #         dist_vol[st_idx:ed_idx] = out['dist']
-    #         valid_mask[st_idx:ed_idx] = out['valid_mask']
-    #     return {'init_grid': init_grid,
-    #             'grid_shape': grid_shape,
-    #             'dist': dist_vol,
-    #             'valid_mask': valid_mask,}
-
-
-    # def extract_dist_vol(self, boundaries):
-    #     step = 0.002
-    #     init_grid, grid_shape = create_init_grid(boundaries, step)
-    #     init_grid = init_grid.to(self.device, dtype=torch.float32)
-        
-    #     batch_pts = 10000
-        
-    #     dist_vol = torch.zeros(init_grid.shape[0], dtype=torch.float32, device=self.device)
-    #     valid_mask = torch.zeros(init_grid.shape[0], dtype=torch.bool, device=self.device)
-        
-    #     for i in range(0, init_grid.shape[0], batch_pts):
-    #         st_idx = i
-    #         ed_idx = min(i + batch_pts, init_grid.shape[0])
-    #         out = self.eval(init_grid[st_idx:ed_idx], return_names={})
-            
-    #         dist_vol[st_idx:ed_idx] = out['dist']
-    #         valid_mask[st_idx:ed_idx] = out['valid_mask']
-    #     return {'init_grid': init_grid,
-    #             'grid_shape': grid_shape,
-    #             'dist': dist_vol,
-    #             'valid_mask': valid_mask,}
-
     def extract_dinov2_features(self, imgs, params):
         K, H, W, _ = imgs.shape
         
@@ -714,6 +654,7 @@ class Fusion():
         self.curr_obs_torch['color_tensor'] = torch.from_numpy(color).to(self.device, dtype=self.dtype) / 255.0
         self.curr_obs_torch['depth'] = torch.from_numpy(obs['depth']).to(self.device, dtype=self.dtype)
         self.curr_obs_torch['pose'] = torch.from_numpy(obs['pose']).to(self.device, dtype=self.dtype)
+        self.curr_obs_torch['correct_pose'] = torch.from_numpy(obs['correct_pose']).to(self.device, dtype=self.dtype)
         self.curr_obs_torch['K'] = torch.from_numpy(obs['K']).to(self.device, dtype=self.dtype)
         
         _, self.H, self.W = obs['depth'].shape
@@ -1120,7 +1061,7 @@ class Fusion():
         mask_confs = []
         for i in range(self.num_cam):
             # mask, label = grounded_instance_sam_bacth_queries_np(self.curr_obs_torch['color'][i], queries, self.ground_dino_model, self.sam_model, thresholds, merge_all)
-            mask, label, mask_conf = grounded_instance_sam_new_ver(self.curr_obs_torch['color'][i], queries, self.ground_dino_model, self.sam_model, thresholds, merge_all, device=self.device)
+            mask, label, mask_conf = grounded_instance_sam_new_ver(self.curr_obs_torch['color'][i], queries, self.ground_dino_model, self.sam_model, thresholds, merge_all, device=self.device, cam_idx=i)
             
             # filter out the mask close to robot_pcd
             if robot_pcd is not None:
@@ -1185,8 +1126,7 @@ class Fusion():
             labels = []
             mask_confs = []
             for i in range(self.num_cam):
-                # mask, label = grounded_instance_sam_bacth_queries_np(self.curr_obs_torch['color'][i], queries, self.ground_dino_model, self.sam_model, thresholds, merge_all)
-                mask, label, mask_conf = grounded_instance_sam_new_ver(self.curr_obs_torch['color'][i], queries, self.ground_dino_model, self.sam_model, thresholds, merge_all, device=self.device)
+                mask, label, mask_conf = grounded_instance_sam_new_ver(self.curr_obs_torch['color'][i], queries, self.ground_dino_model, self.sam_model, thresholds, merge_all, device=self.device, cam_idx=i)
                 
                 # filter out the mask close to robot_pcd
                 if robot_pcd is not None:
@@ -1215,26 +1155,6 @@ class Fusion():
             _, idx = np.unique(labels[0], return_index=True)
             self.curr_obs_torch['semantic_label'] = list(np.array(labels[0])[np.sort(idx)]) # list of semantic label we have
             
-            # fig, axs = plt.subplots(4, 4 + 1, sharex=True, figsize=(20,20))
-            # for i in range(4):
-            #     axs[i, 0].imshow(self.curr_obs_torch['color'][i])
-            #     for j in range(4):
-            #         axs[i, j + 1].imshow(query_mask.detach().cpu().numpy()[i] == j)
-            # plt.show()
-            
-            # # verfiy the assumption that the mask label is the same for all cameras
-            # for i in range(self.num_cam):
-            #     try:
-            #         assert self.curr_obs_torch['mask_label'][i] == self.curr_obs_torch['mask_label'][0]
-            #     except:
-            #         print('The mask label is not the same for all cameras!')
-            #         print(self.curr_obs_torch['mask_label'])
-            #         for j in range(self.num_cam):
-            #             for k in range(len(self.curr_obs_torch['mask_label'][j])):
-            #                 plt.subplot(1, len(self.curr_obs_torch['mask_label'][j]), k+1)
-            #                 plt.imshow(self.curr_obs_torch['mask'][j].detach().cpu().numpy() == k)
-            #             plt.show()
-            #         raise AssertionError
             
             # align instance mask id to the first frame
             print(self.curr_obs_torch['mask_label'])
@@ -1248,7 +1168,7 @@ class Fusion():
             mask_confs = []
             for i in range(self.num_cam):
                 # mask, label = grounded_instance_sam_bacth_queries_np(self.curr_obs_torch['color'][i], queries, self.ground_dino_model, self.sam_model, thresholds, merge_all)
-                mask, label, mask_conf = grounded_instance_sam_new_ver(self.curr_obs_torch['color'][i], queries, self.ground_dino_model, self.sam_model, thresholds, merge_all)
+                mask, label, mask_conf = grounded_instance_sam_new_ver(self.curr_obs_torch['color'][i], queries, self.ground_dino_model, self.sam_model, thresholds, merge_all, cam_idx=i)
                 query_mask[i] = mask
                 mask_confs.append(mask_conf)
                 # labels.append(label)
@@ -1278,6 +1198,7 @@ class Fusion():
         pose = self.curr_obs_torch['pose'].detach().cpu().numpy() # [num_cam, 3, 4]
         pad = np.tile(np.array([[[0,0,0,1]]]), [pose.shape[0], 1, 1])
         pose = np.concatenate([pose, pad], axis=1)
+        
         pcd, _ = aggr_point_cloud_from_data(color, depth, K, pose, downsample=False, masks=sel_mask, out_o3d=False, boundaries=boundaries, is_data_from_adamanip=self.is_data_from_adamanip)
         return pcd
     
@@ -1363,30 +1284,10 @@ class Fusion():
                 mask = res[k].detach().cpu().numpy()
                 num_instance = mask.shape[1]
                 mask = onehot2instance(mask) # (N, nq) -> (N)
-                
-                # mask_vis = np.zeros((mask.shape[0], 3))
-                # mask_vis[mask == 0] = np.array(series_RGB[5])
-                # mask_vis[mask == 1] = np.array(series_RGB[1])
-                # mask_vis[mask == 2] = np.array(series_RGB[2])
-                # mask_vis[mask == 3] = np.array(series_RGB[4])
-                # mask_vis[mask == 4] = np.array(series_RGB[6])
-                
-                # mask_vis = np.concatenate([mask_vis, np.ones((mask_vis.shape[0], 1)) * 255], axis=1).astype(np.uint8)
-                
                 vertices_color = trimesh.visual.interpolate(mask / num_instance, color_map='jet')
                 mask_meshes.append(trimesh.Trimesh(vertices=vertices, faces=triangles[..., ::-1], vertex_colors=vertices_color))
         return mask_meshes
 
-    # def create_descriptor_mesh(self, vertices, triangles, res, params):
-    #     pca = params['pca']
-    #     features = res['dino_feats'].detach().cpu().numpy()
-    #     features_pca = pca.transform(features)
-    #     for i in range(features_pca.shape[1]):
-    #         features_pca[:, i] = (features_pca[:, i] - features_pca[:, i].min()) / (features_pca[:, i].max() - features_pca[:, i].min())
-    #     features_pca = (features_pca * 255).astype(np.uint8)
-    #     features_pca = np.concatenate([features_pca, np.ones((features_pca.shape[0], 1), dtype=np.uint8) * 255], axis=1)
-    #     features_mesh = trimesh.Trimesh(vertices=vertices, faces=triangles[..., ::-1], vertex_colors=features_pca)
-    #     return features_mesh
     
     def create_descriptor_mesh(self, vertices, triangles, res, params, mask_out_bg):
         pca = params['pca']
@@ -1403,8 +1304,6 @@ class Fusion():
                 features_rgb[:, i] = (features_pca[:, i] - features_pca[:, i].min()) / (features_pca[:, i].max() - features_pca[:, i].min())
             else:
                 features_rgb[:, i] = (features_pca[:, i] - features_pca[:, i].min()) / (features_pca[:, i].max() - features_pca[:, i].min())
-                # features_rgb[~bg, i] = (features_pca[~bg, i] - features_pca[~bg, i].min()) / (features_pca[~bg, i].max() - features_pca[~bg, i].min())
-                # features_rgb[bg, i] = 0.8
         features_rgb[bg] = np.ones(3) * 0.8
         features_rgb = features_rgb[..., ::-1]
             
@@ -1558,7 +1457,7 @@ class Fusion():
                 K_i = self.curr_obs_torch['K'][cam_i].detach().cpu().numpy()
                 pose_i = self.curr_obs_torch['pose'][cam_i].detach().cpu().numpy()
                 pose_i = np.concatenate([pose_i, np.array([[0, 0, 0, 1]])], axis=0)
-                valid_depth = (depth_i > 0.0) & (depth_i < 1.5)
+                valid_depth = (depth_i > 0.0) & (depth_i < 2.5)
                 instance_mask = instance_mask & valid_depth
                 instance_mask = (instance_mask * 255).astype(np.uint8)
                 # plt.subplot(1, 2, 1)
@@ -1747,7 +1646,6 @@ def compare_float_prec():
     
     print('feat diff: ', torch.norm(feats - feats_full, dim=-1).mean())
     print('feat diff max: ', torch.max(torch.abs(feats - feats_full)))
-
 
 def test_grounded_sam():
     img = cv2.imread("/home/yixuan/bdai/general_dp/left_bottom_view_color_0.png")
