@@ -533,9 +533,13 @@ def depth2fgpcd(depth, mask, cam_params, is_data_from_adamanip=False):
     pos_x = pos_x[mask]
     pos_y = pos_y[mask]
     if is_data_from_adamanip:
-        fgpcd[:, 0] = (pos_x - cx) * depth[mask] / fx
-        fgpcd[:, 1] = - (pos_y - cy) * depth[mask] / fy
-        fgpcd[:, 2] = -depth[mask]
+        # see IssakGym  for more details
+        # https://gist.github.com/gavrielstate/8c855eb3b4b1f23e2990bc02c534792e
+        # would be good to figure out how to change extrinsics to the d3field format
+        depth_values = - depth[mask]
+        fgpcd[:, 0] = - (pos_x - cx) * depth_values / fx
+        fgpcd[:, 1] = (pos_y - cy) * depth_values / fy
+        fgpcd[:, 2] = depth_values
     else:
         fgpcd[:, 0] = (pos_x - cx) * depth[mask] / fx
         fgpcd[:, 1] = (pos_y - cy) * depth[mask] / fy
@@ -659,6 +663,7 @@ def np2o3d(pcd, color=None):
     # color: (n, 3)
     pcd_o3d = o3d.geometry.PointCloud()
     pcd_o3d.points = o3d.utility.Vector3dVector(pcd)
+    assert pcd.shape[0] > 0, f'pcd.shape: {pcd.shape}, no points in the pcd'
     if color is not None:
         assert pcd.shape[0] == color.shape[0]
         assert color.max() <= 1

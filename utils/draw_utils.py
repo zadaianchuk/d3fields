@@ -274,42 +274,6 @@ def compute_axis_points(pose):
     colors = np.asarray([[255,0,0],[0,255,0,],[0,0,255],[0,0,0]],np.uint8)
     return pts.T, colors
 
-def aggr_point_cloud(database, sel_time=None, downsample=True):
-    img_ids = database.get_img_ids()
-    start = 0
-    end = len(img_ids)
-    # end = 2
-    step = 1
-    # visualize scaled COLMAP poses
-    COLMAP_geometries = []
-    base_COLMAP_pose = database.get_base_pose()
-    base_COLMAP_pose = np.concatenate([base_COLMAP_pose, np.array([[0, 0, 0, 1]])], axis=0)
-    for i in range(start, end, step):
-        id = img_ids[i]
-        depth = database.get_depth(id, sel_time=sel_time)
-        color = database.get_image(id, sel_time=sel_time) / 255.
-        K = database.get_K(id)
-        cam_param = [K[0,0], K[1,1], K[0,2], K[1,2]] # fx, fy, cx, cy
-        mask = database.get_mask(id, sel_time=sel_time) & (depth > 0)
-        pcd = depth2fgpcd(depth, mask, cam_param)
-        pose = database.get_pose(id)
-        pose = np.concatenate([pose, np.array([[0, 0, 0, 1]])], axis=0)
-        pose = base_COLMAP_pose @ np.linalg.inv(pose)
-        # print('COLMAP pose:')
-        # print(pose)
-        # pose[:3, 3] = pose[:3, 3] / 82.5
-        trans_pcd = pose @ np.concatenate([pcd.T, np.ones((1, pcd.shape[0]))], axis=0)
-        trans_pcd = trans_pcd[:3, :].T
-        pcd_o3d = np2o3d(trans_pcd, color[mask])
-        radius = 0.01
-        # downsample
-        if downsample:
-            pcd_o3d = pcd_o3d.voxel_down_sample(radius)
-        COLMAP_geometries.append(pcd_o3d)
-    aggr_geometry = o3d.geometry.PointCloud()
-    for pcd in COLMAP_geometries:
-        aggr_geometry += pcd
-    return aggr_geometry
 
 def voxel_downsample(pcd, voxel_size, pcd_color=None):
     # :param pcd: [N,3] numpy array
@@ -342,32 +306,27 @@ def aggr_point_cloud_from_data(colors, depths, Ks, poses, downsample=True, masks
         color = colors[i]
         K = Ks[i]
         cam_param = [K[0,0], K[1,1], K[0,2], K[1,2]] # fx, fy, cx, cy
+        if is_data_from_adamanip:
+            th = 2.5
+        else: 
+            th = 1.5
+        print(f'depth: {depth.min()}, {depth.max()}')
         if masks is None:
-            if is_data_from_adamanip:
-                th = 2.5
-            else: 
-                th = 1.5
             mask = (depth > 0) & (depth < th)
         else:
-            mask = masks[i] & (depth > 0)
-        # mask = np.ones_like(depth, dtype=bool)
-        pcd = depth2fgpcd(depth, mask, cam_param, is_data_from_adamanip)
+            mask = masks[i] & (depth > 0) & (depth < th)
+        pcd = depth2fgpcd(depth, mask, cam_param, is_data_from_adamanip=is_data_from_adamanip)
         
+        points_homo = np.concatenate([pcd, np.ones((pcd.shape[0], 1))], axis=1)
+
         pose = poses[i]
-        pose = np.linalg.inv(pose)
-        
-        trans_pcd = pose @ np.concatenate([pcd.T, np.ones((1, pcd.shape[0]))], axis=0)
-        trans_pcd = trans_pcd[:3, :].T
-        
-        # plt.subplot(1, 4, 1)
-        # plt.imshow(trans_pcd[:, 0].reshape(H, W))
-        # plt.subplot(1, 4, 2)
-        # plt.imshow(trans_pcd[:, 1].reshape(H, W))
-        # plt.subplot(1, 4, 3)
-        # plt.imshow(trans_pcd[:, 2].reshape(H, W))
-        # plt.subplot(1, 4, 4)
-        # plt.imshow(color)
-        # plt.show()
+        # pose = np.linalg.inv(pose)
+
+        transformed_homo = (pose @ points_homo.T).T
+        trans_pcd = transformed_homo[:, :3]
+        # old version not compatible with AdaManip data
+        # trans_pcd = pose @ np.concatenate([pcd.T, np.ones((1, pcd.shape[0]))], axis=0)
+        # trans_pcd = trans_pcd[:3, :].T
         
         if boundaries is not None:
             x_lower = boundaries['x_lower']
