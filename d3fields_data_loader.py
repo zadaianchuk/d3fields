@@ -177,7 +177,7 @@ def convert_to_fusion_format(datapoint: Dict) -> Dict:
         K_matrices.append(cam_params['intrinsics'])
         # Convert world-to-camera to camera-to-world and extract 3x4
         extrinsics_c2w = np.linalg.inv(cam_params['extrinsics']).T
-        assert np.all(extrinsics_c2w[-1] == np.array([[0,0,0,1]]))
+        assert np.allclose(extrinsics_c2w[-1], np.array([0,0,0,1]), rtol=1e-5, atol=1e-5)
         pose_matrices.append(extrinsics_c2w[:3, :])
         correct_pose_matrices.append((cam_params['extrinsics'].T)[:3, :])
     
