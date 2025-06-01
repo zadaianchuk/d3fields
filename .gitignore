@@ -162,3 +162,4 @@ cython_debug/
 ckpts/
 data/
 output/
+tests/test_outputs/
