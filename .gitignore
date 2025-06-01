@@ -163,3 +163,4 @@ ckpts/
 data/
 output/
 tests/test_outputs/
+.vscode/
