@@ -39,7 +39,7 @@ DEFAULT_BOUNDARIES = {
 # Default segmentation thresholds
 DEFAULT_THRESHOLDS = [0.25, 0.25]
 
-def infer_boundaries_and_step(point_clouds: dict, padding_ratio: float = 0.1, target_grid_points: int = 100000):
+def infer_boundaries_and_step(point_clouds: dict, padding_ratio: float = 0.1, target_grid_points: int = 500000):
     """
     Infer workspace boundaries and step size from extracted point clouds.
     
@@ -808,7 +808,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description='Compute D3Fields for AdaManip dataset')
-    parser.add_argument('--output_dir', type=str, default='d3fields_results',
+    parser.add_argument('--output_dir', type=str, default='output/d3fields_results',
                        help='Output directory for results')
     parser.add_argument('--max_envs', type=int, default=3,
                        help='Maximum environments per type to process')

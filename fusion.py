@@ -424,94 +424,6 @@ class Fusion():
                    'valid_mask': ~dist_all_invalid}
         
         return outputs
-        
-        
-        # if 'dino_feats' in return_names:
-        #     inter_feats = interpolate_feats(self.curr_obs_torch['dino_feats'].permute(0,3,1,2),
-        #                                     pts_2d,
-        #                                     h = self.H,
-        #                                     w = self.W,
-        #                                     padding_mode='zeros',
-        #                                     align_corners=True,
-        #                                     inter_mode='bilinear') # [rfn,pn,feat_dim]
-        # else:
-        #     inter_feats = None
-        
-        # if 'mask_shoe' in self.curr_obs_torch and 'mask_shoe' in return_names:
-        #     inter_masks = interpolate_feats(self.curr_obs_torch['mask_shoe'].permute(0,3,1,2),
-        #                                     pts_2d,
-        #                                     h = self.H,
-        #                                     w = self.W,
-        #                                     padding_mode='zeros',
-        #                                     align_corners=True,
-        #                                     inter_mode='nearest') # [rfn,pn,nq]
-        # else:
-        #     inter_masks = None
-        
-        # # compute the features of the points
-        # if 'dino_feats' in return_names:
-        #     features = (inter_feats * dist_valid.float().unsqueeze(-1) * dist_weight.unsqueeze(-1)).sum(0) / (dist_valid.float().sum(0).unsqueeze(-1) + 1e-6) # [pn,feat_dim]
-        #     # features = (inter_feats * dist_valid.float().unsqueeze(-1)).sum(0) / (dist_valid.float().sum(0).unsqueeze(-1) + 1e-6) # [pn,feat_dim]
-        #     features[dist_all_invalid] = 0.0
-        # else:
-        #     features = None
-        
-        # # compute the query masks of the points
-        # if inter_masks is not None and 'mask_shoe' in return_names:
-        #     query_masks = (inter_masks * dist_valid.float().unsqueeze(-1) * dist_weight.unsqueeze(-1)).sum(0) / (dist_valid.float().sum(0).unsqueeze(-1) + 1e-6) # [pn,nq]
-        #     # query_masks = (inter_masks * dist_valid.float().unsqueeze(-1)).sum(0) / (dist_valid.float().sum(0).unsqueeze(-1) + 1e-6) # [pn,nq]
-        #     query_masks[dist_all_invalid] = 0.0
-        # else:
-        #     query_masks = None
-        
-        # return {'dist': dist,
-        #         'dino_feats': features,
-        #         'mask_shoe': query_masks,
-        #         'valid_mask': ~dist_all_invalid}
-    
-    
-        # if 'dino_feats' in return_names:
-        #     inter_feats = interpolate_feats(self.curr_obs_torch['dino_feats'].permute(0,3,1,2),
-        #                                     pts_2d,
-        #                                     h = self.H,
-        #                                     w = self.W,
-        #                                     padding_mode='zeros',
-        #                                     align_corners=True,
-        #                                     inter_mode='bilinear') # [rfn,pn,feat_dim]
-        # else:
-        #     inter_feats = None
-        
-        # if 'mask_shoe' in self.curr_obs_torch and 'mask_shoe' in return_names:
-        #     inter_masks = interpolate_feats(self.curr_obs_torch['mask_shoe'].permute(0,3,1,2),
-        #                                     pts_2d,
-        #                                     h = self.H,
-        #                                     w = self.W,
-        #                                     padding_mode='zeros',
-        #                                     align_corners=True,
-        #                                     inter_mode='nearest') # [rfn,pn,nq]
-        # else:
-        #     inter_masks = None
-        
-        # # compute the features of the points
-        # if 'dino_feats' in return_names:
-        #     features = (inter_feats * dist_valid.float().unsqueeze(-1) * dist_weight.unsqueeze(-1)).sum(0) / (dist_valid.float().sum(0).unsqueeze(-1) + 1e-6) # [pn,feat_dim]
-        #     # features = (inter_feats * dist_valid.float().unsqueeze(-1)).sum(0) / (dist_valid.float().sum(0).unsqueeze(-1) + 1e-6) # [pn,feat_dim]
-        #     features[dist_all_invalid] = 0.0
-        # else:
-        #     features = None
-        
-        # # compute the query masks of the points
-        # if inter_masks is not None and 'mask_shoe' in return_names:
-        #     query_masks = (inter_masks * dist_valid.float().unsqueeze(-1) * dist_weight.unsqueeze(-1)).sum(0) / (dist_valid.float().sum(0).unsqueeze(-1) + 1e-6) # [pn,nq]
-        #     # query_masks = (inter_masks * dist_valid.float().unsqueeze(-1)).sum(0) / (dist_valid.float().sum(0).unsqueeze(-1) + 1e-6) # [pn,nq]
-        #     query_masks[dist_all_invalid] = 0.0
-        # else:
-        #     query_masks = None
-        
-        # return {'dist': dist,
-        #         'dino_feats': features,
-        #         'mask_shoe': query_masks,
-        #         'valid_mask': ~dist_all_invalid}
     
     def batch_eval(self, pts, return_names=['dino_feats', 'mask']):
         batch_pts = 60000
@@ -1287,7 +1199,6 @@ class Fusion():
                 vertices_color = trimesh.visual.interpolate(mask / num_instance, color_map='jet')
                 mask_meshes.append(trimesh.Trimesh(vertices=vertices, faces=triangles[..., ::-1], vertex_colors=vertices_color))
         return mask_meshes
-
     
     def create_descriptor_mesh(self, vertices, triangles, res, params, mask_out_bg):
         pca = params['pca']
