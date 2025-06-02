@@ -1,0 +1,101 @@
+{
+  "bottle": {
+    "status": "success",
+    "num_samples": 100,
+    "num_features": 25600,
+    "num_fg_features": 11876,
+    "explained_variance": [
+      0.0746510848402977,
+      0.06030881777405739,
+      0.055445075035095215
+    ]
+  },
+  "door": {
+    "status": "success",
+    "num_samples": 100,
+    "num_features": 25600,
+    "num_fg_features": 16832,
+    "explained_variance": [
+      0.0787656381726265,
+      0.06636841595172882,
+      0.05309462174773216
+    ]
+  },
+  "safe": {
+    "status": "success",
+    "num_samples": 100,
+    "num_features": 25600,
+    "num_fg_features": 21078,
+    "explained_variance": [
+      0.11796397715806961,
+      0.08472467213869095,
+      0.06878077983856201
+    ]
+  },
+  "coffee_machine": {
+    "status": "success",
+    "num_samples": 100,
+    "num_features": 25600,
+    "num_fg_features": 10594,
+    "explained_variance": [
+      0.11739840358495712,
+      0.07463173568248749,
+      0.05328492075204849
+    ]
+  },
+  "window": {
+    "status": "success",
+    "num_samples": 100,
+    "num_features": 25600,
+    "num_fg_features": 12861,
+    "explained_variance": [
+      0.12028846889734268,
+      0.08195963501930237,
+      0.056607648730278015
+    ]
+  },
+  "pressure_cooker": {
+    "status": "success",
+    "num_samples": 100,
+    "num_features": 25600,
+    "num_fg_features": 10684,
+    "explained_variance": [
+      0.1069733053445816,
+      0.04864915460348129,
+      0.042530607432127
+    ]
+  },
+  "pen": {
+    "status": "success",
+    "num_samples": 100,
+    "num_features": 25600,
+    "num_fg_features": 7394,
+    "explained_variance": [
+      0.12062449753284454,
+      0.07022100687026978,
+      0.048700686544179916
+    ]
+  },
+  "lamp": {
+    "status": "success",
+    "num_samples": 100,
+    "num_features": 25600,
+    "num_fg_features": 6185,
+    "explained_variance": [
+      0.13299793004989624,
+      0.062488384544849396,
+      0.04405205696821213
+    ]
+  },
+  "microwave": {
+    "status": "success",
+    "num_samples": 100,
+    "num_features": 25600,
+    "num_fg_features": 16131,
+    "explained_variance": [
+      0.1741650402545929,
+      0.09182269871234894,
+      0.06909412145614624
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+PCA Model Summary for coffee_machine
+Model: dinov2_vitl14
+Feature dimension: 1024
+Number of samples: 10594
+Explained variance ratio: [0.1173984  0.07463174 0.05328492]
+Total explained variance: 0.245

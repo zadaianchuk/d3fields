@@ -29,6 +29,19 @@ TASK_QUERIES = {
     'OpenPressureCooker': ['pressure cooker', 'robotic arm',]
 }
 
+# Object type mapping from task names to object categories
+OBJECT_TYPE_MAPPING = {
+    'OpenBottle': 'bottle',
+    'OpenDoor': 'door', 
+    'OpenSafe': 'safe',
+    'OpenCoffeeMachine': 'coffee_machine',
+    'OpenWindow': 'window',
+    'OpenPressureCooker': 'pressure_cooker',
+    'OpenPen': 'pen',
+    'OpenLamp': 'lamp',
+    'OpenMicroWave': 'microwave'
+}
+
 # Default boundaries for the workspace (adjust based on your setup)
 DEFAULT_BOUNDARIES = {
     'x_lower': -1, 'x_upper': 1,
@@ -237,8 +250,8 @@ def create_meshes_and_save(fusion, output_dir: Path, task: str, environment: str
     Args:
         fusion: Fusion object
         output_dir: Output directory
-        task: Task name  
-        environment: Environment name
+        task: Task name (empty string to use output_dir directly)
+        environment: Environment name (empty string to use output_dir directly)
         point_clouds: Dictionary of extracted point clouds for boundary inference
         boundaries: Workspace boundaries (None to infer from data)
         step_size: Grid step size for mesh generation (None to infer from data)
@@ -273,7 +286,7 @@ def create_meshes_and_save(fusion, output_dir: Path, task: str, environment: str
     print(f"    Extracted {len(vertices)} vertices and {len(triangles)} triangles")
     
     if len(vertices) == 0 or len(triangles) == 0:
-        raise ValueError(f"No mesh vertices/triangles extracted for {task}/{environment}")
+        raise ValueError(f"No mesh vertices/triangles extracted for {task}/{environment}" if task and environment else "No mesh vertices/triangles extracted")
     
     # Evaluate mesh vertices for features, masks, and colors
     vertices_tensor = torch.from_numpy(vertices).to(device, dtype=torch.float32)
@@ -281,15 +294,20 @@ def create_meshes_and_save(fusion, output_dir: Path, task: str, environment: str
     
     with torch.no_grad():
         vertex_out = fusion.batch_eval(vertices_tensor, return_names=['dino_feats', 'mask', 'color_tensor'])
-    # Create output directory for meshes
-    mesh_output_dir = output_dir / task / environment
+    
+    # Create output directory for meshes - if task/environment are empty, use output_dir directly
+    if task and environment:
+        mesh_output_dir = output_dir / task / environment
+    else:
+        mesh_output_dir = output_dir
     mesh_output_dir.mkdir(parents=True, exist_ok=True)
     
     # Create and save mask meshes (one for each instance)
     print("    Creating mask meshes...")
     mask_meshes = fusion.create_instance_mask_mesh(vertices, triangles, vertex_out)
     for i, mask_mesh in enumerate(mask_meshes):
-        mask_path = mesh_output_dir / f"mask_mesh_{i}_{task.lower()}.ply"
+        task_suffix = f"_{task.lower()}" if task else ""
+        mask_path = mesh_output_dir / f"mask_mesh_{i}{task_suffix}.ply"
         mask_mesh.export(str(mask_path))
         print(f"    Saved mask mesh {i} to {mask_path}")
 
@@ -297,30 +315,26 @@ def create_meshes_and_save(fusion, output_dir: Path, task: str, environment: str
     print("    Creating feature mesh...")
 
     # Load or create a simple PCA model for features
-    pca_model = create_simple_pca_model()
+    object_name = OBJECT_TYPE_MAPPING.get(task, task.lower()) if task else None
+    pca_model = create_simple_pca_model(object_name)
     #save only vertices as ply
     # vertices_path = mesh_output_dir / f"vertices_{task.lower()}.ply"
     # o3d.io.write_point_cloud(str(vertices_path), o3d.geometry.PointCloud(vertices))
     
     # print(f"    Saved vertices to {vertices_path}")
 
-
-
-
     feature_mesh = fusion.create_descriptor_mesh(vertices, triangles, vertex_out, {'pca': pca_model}, mask_out_bg=True)
-    feature_path = mesh_output_dir / f"feature_mesh_{task.lower()}.ply"
+    task_suffix = f"_{task.lower()}" if task else ""
+    feature_path = mesh_output_dir / f"feature_mesh{task_suffix}.ply"
     feature_mesh.export(str(feature_path))
     print(f"    Saved feature mesh to {feature_path}")
     
-
-    
-
     color_mesh = fusion.create_color_mesh(vertices, triangles, vertex_out)
-    color_path = mesh_output_dir / f"color_mesh_{task.lower()}.ply"
+    color_path = mesh_output_dir / f"color_mesh{task_suffix}.ply"
     color_mesh.export(str(color_path))
     print(f"    Saved color mesh to {color_path}")
     
-    print(f"    ✓ 3D mesh generation complete for {task}/{environment}")
+    print(f"    ✓ 3D mesh generation complete for {task}/{environment}" if task and environment else f"    ✓ 3D mesh generation complete")
     
     return boundaries, step_size  # Return the used boundaries and step size
 
@@ -360,14 +374,39 @@ def create_point_cloud_ply_files(fusion, output_dir: Path, task: str, environmen
     print(f"    ✓ Point cloud PLY generation complete for {task}/{environment}")
 
 
-def create_simple_pca_model():
+def create_simple_pca_model(object_name: str = None, model_name: str = "dinov2_vitl14"):
     """
-    Create a simple PCA model for feature visualization.
-    In a real scenario, you would load a pre-trained PCA model.
+    Load a proper PCA model for the given object type.
+    Falls back to a dummy PCA model if the proper one is not found.
+    
+    Args:
+        object_name: Name of the object (e.g., 'bottle', 'door')
+        model_name: DINOv2 model name used for PCA
+    
+    Returns:
+        PCA model for feature visualization
     """
     from sklearn.decomposition import PCA
+    import pickle
+    from pathlib import Path
     
-    # Create a dummy PCA model with 3 components for RGB visualization
+    # Try to load proper PCA model if object_name is provided
+    if object_name:
+        pca_model_path = Path("pca_model") / f"{object_name}_{model_name}.pkl"
+        
+        if pca_model_path.exists():
+            try:
+                with open(pca_model_path, 'rb') as f:
+                    pca_model_dict = pickle.load(f)
+                    print(f"    Loaded proper PCA model for {object_name} from {pca_model_path}")
+                    return pca_model_dict['pca']
+            except Exception as e:
+                print(f"    Warning: Failed to load PCA model for {object_name}: {e}")
+        else:
+            print(f"    Warning: PCA model not found at {pca_model_path}")
+    
+    # Fallback to dummy PCA model
+    print(f"    Using dummy PCA model for {object_name or 'unknown object'}")
     pca = PCA(n_components=3)
     # Fit with dummy data (in practice, this should be fitted on real features)
     dummy_features = np.random.randn(1000, 1024)  # Assuming 1024-dim DINOv2 features
@@ -383,8 +422,8 @@ def save_point_clouds_as_ply(point_clouds: dict, output_dir: Path, task: str, en
     Args:
         point_clouds: Dictionary of point clouds {instance_name: numpy_array}
         output_dir: Output directory
-        task: Task name
-        environment: Environment name
+        task: Task name (empty string to use output_dir directly)
+        environment: Environment name (empty string to use output_dir directly)
     """
     if not point_clouds:
         print("    No point clouds to save")
@@ -392,8 +431,11 @@ def save_point_clouds_as_ply(point_clouds: dict, output_dir: Path, task: str, en
     
     print(f"    Saving {len(point_clouds)} point clouds as PLY files...")
     
-    # Create output directory
-    mesh_output_dir = output_dir / task / environment
+    # Create output directory - if task/environment are empty, use output_dir directly
+    if task and environment:
+        mesh_output_dir = output_dir / task / environment
+    else:
+        mesh_output_dir = output_dir
     mesh_output_dir.mkdir(parents=True, exist_ok=True)
     
     import open3d as o3d
@@ -408,15 +450,16 @@ def save_point_clouds_as_ply(point_clouds: dict, output_dir: Path, task: str, en
             colors = np.random.rand(len(pcd_np), 3)  # Random colors for now
             o3d_pcd.colors = o3d.utility.Vector3dVector(colors)
             
-            # Save as PLY
-            pcd_path = mesh_output_dir / f"{inst_name}_{task.lower()}.ply"
+            # Save as PLY - use task name if provided, otherwise use generic name
+            task_suffix = f"_{task.lower()}" if task else ""
+            pcd_path = mesh_output_dir / f"{inst_name}{task_suffix}.ply"
             o3d.io.write_point_cloud(str(pcd_path), o3d_pcd)
             print(f"    Saved {inst_name} point cloud ({len(pcd_np)} points) to {pcd_path}")
             
         except Exception as e:
             print(f"    Warning: Failed to save {inst_name} point cloud: {e}")
     
-    print(f"    ✓ Point cloud PLY files saved for {task}/{environment}")
+    print(f"    ✓ Point cloud PLY files saved for {task}/{environment}" if task and environment else f"    ✓ Point cloud PLY files saved")
 
 
 def create_pointcloud_from_depth_and_mask(fusion, inst_id):
@@ -499,179 +542,510 @@ def create_pointcloud_from_depth_and_mask(fusion, inst_id):
         return torch.empty((0, 3), device=fusion.device)
 
 
-def process_environment(task: str, environment: str, output_dir: Path, 
-                        device: str = 'cuda:0', frame_idx: int = 0, use_gt_masks: bool = False):
+def get_frame_count(task: str, environment: str) -> int:
+    """Get the number of frames available for a given task/environment."""
+    loader = D3FieldsDataLoader()
+    
+    # Load any frame to get dataset info
+    try:
+        datapoint = loader.load_datapoint(task, environment, frame_idx=0)
+        return datapoint['dataset_info']['num_frames']
+    except Exception as e:
+        print(f"    Warning: Could not determine frame count for {task}/{environment}: {e}")
+        return 1  # Default to 1 frame
+
+
+def compute_frame_scores(frame_results: dict, output_dir: Path, task: str, environment: str) -> dict:
     """
-    Process a single environment and compute D3Fields.
+    Compute scores for a single frame's results.
+    
+    Args:
+        frame_results: Results from process_single_frame
+        output_dir: Output directory
+        task: Task name
+        environment: Environment name
+    
+    Returns:
+        dict: Scoring metrics
+    """
+    scores = {
+        'instance_count': frame_results.get('num_instances', 0),
+        'point_cloud_sizes': {},
+        'mesh_quality': {},
+        'processing_success': frame_results.get('status') == 'success'
+    }
+    
+    # Load point clouds and compute sizes
+    frame_dir = Path(frame_results.get('output_dir', ''))
+    if frame_dir.exists():
+        for file in frame_dir.glob("pointcloud_*.npy"):
+            try:
+                pcd = np.load(file)
+                instance_name = file.stem
+                scores['point_cloud_sizes'][instance_name] = len(pcd)
+            except Exception as e:
+                print(f"    Warning: Could not load point cloud {file}: {e}")
+        
+        # Check for mesh files
+        mesh_files = list(frame_dir.glob("*_mesh_*.ply"))
+        scores['mesh_quality']['num_meshes'] = len(mesh_files)
+        scores['mesh_quality']['mesh_files'] = [f.name for f in mesh_files]
+    
+    return scores
+
+
+def process_single_frame(task: str, environment: str, frame_idx: int, output_dir: Path, 
+                        device: str = 'cuda:0', use_gt_masks: bool = False) -> dict:
+    """
+    Process a single frame and return results.
+    
+    Args:
+        task: Task name
+        environment: Environment name
+        frame_idx: Frame index to process
+        output_dir: Output directory for results
+        device: Device to run on
+        use_gt_masks: Whether to use GT masks instead of GroundingSAM
+    
+    Returns:
+        dict: Processing results
+    """
+    print(f"    Processing frame {frame_idx}...")
+    
+    try:
+        # Load data
+        loader = D3FieldsDataLoader()
+        datapoint = loader.load_datapoint(task, environment, frame_idx)
+        
+        # Convert to fusion format
+        obs = convert_to_fusion_format(datapoint)
+        
+        # Get task-specific queries
+        queries = TASK_QUERIES.get(task, ['object', 'robotic arm', 'gripper'])
+        
+        # Real D3Fields processing
+        num_cameras = obs['color'].shape[0]
+        fusion = Fusion(num_cam=num_cameras, device=device, is_data_from_adamanip=True)
+        
+        # Update with observation
+        fusion.update(obs)
+        
+        if use_gt_masks:
+            # Load and apply GT masks
+            gt_masks = load_gt_masks(task, environment, frame_idx, num_cameras)
+            apply_gt_masks_to_fusion_simple(fusion, gt_masks)
+        else:
+            raise ValueError('use_gt_masks must be True')
+        
+        # Get results
+        num_instances = fusion.get_inst_num()
+        print(f"      Found {num_instances} instances")
+        
+        # Extract point clouds and features
+        point_clouds = {}
+        features_info = {}
+        
+        for inst_id in range(1, num_instances):
+            print(f"      Extracting point cloud for instance {inst_id}")
+            
+            pcd = fusion.extract_masked_pcd([inst_id], None)
+            print(f"      Extracted {pcd.shape[0]} points for instance {inst_id}")
+            
+            if pcd.shape[0] == 0:
+                print(f"      Warning: No points extracted for instance {inst_id}")
+                continue
+            
+            if pcd.shape[0] > 0:
+                # Convert tensor to numpy if needed
+                pcd_np = pcd.cpu().numpy() if hasattr(pcd, 'cpu') else pcd
+                point_clouds[f'instance_{inst_id}'] = pcd_np
+                
+                # Extract features
+                N = min(100, pcd.shape[0])
+                if N > 0:
+                    src_feats_list, src_pts_list, img_list = fusion.select_features_from_pcd(
+                        pcd_np, N=N, per_instance=True, vis=False
+                    )
+                    
+                    features_info[f'instance_{inst_id}'] = {
+                        'num_features': len(src_feats_list),
+                        'feature_dims': [f.shape for f in src_feats_list] if src_feats_list else [],
+                        'num_points': N
+                    }
+        
+        print(f"      Successfully extracted point clouds for {len(point_clouds)} instances")
+        
+        # Create frame-specific output directory
+        frame_output_dir = output_dir / f"frame_{frame_idx}"
+        frame_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save point clouds as PLY files - pass frame_output_dir directly 
+        # and empty strings for task/environment since directory is already correct
+        save_point_clouds_as_ply(point_clouds, frame_output_dir, "", "")
+        
+        # Create and save 3D meshes - pass frame_output_dir directly
+        # and empty strings for task/environment since directory is already correct
+        try:
+            used_boundaries, used_step_size = create_meshes_and_save(
+                fusion, frame_output_dir, "", "", 
+                point_clouds=point_clouds, boundaries=None, step_size=None
+            )
+        except Exception as e:
+            print(f"      Warning: Failed to create 3D meshes for frame {frame_idx}: {e}")
+            used_boundaries, used_step_size = infer_boundaries_and_step(point_clouds or {})
+        
+        # Clean up fusion
+        fusion.close()
+        
+        # Save point clouds as numpy arrays
+        for inst_id, pcd in point_clouds.items():
+            pcd_path = frame_output_dir / f"pointcloud_{inst_id}.npy"
+            np.save(pcd_path, pcd)
+        
+        # Save original images for reference
+        for cam_id, color_img in enumerate(obs['color']):
+            img_path = frame_output_dir / f"camera_{cam_id}_color.png"
+            color_bgr = cv2.cvtColor(color_img, cv2.COLOR_RGB2BGR)
+            cv2.imwrite(str(img_path), color_bgr)
+        
+        # Save frame metadata
+        frame_metadata = {
+            'task': task,
+            'environment': environment,
+            'frame_idx': frame_idx,
+            'queries': queries,
+            'num_instances': num_instances,
+            'num_cameras': obs['color'].shape[0],
+            'boundaries': used_boundaries,
+            'step_size': used_step_size,
+            'thresholds': DEFAULT_THRESHOLDS,
+            'image_shape': obs['color'].shape[1:3],
+            'features_info': features_info,
+            'use_gt_masks': use_gt_masks,
+        }
+        
+        metadata_path = frame_output_dir / "frame_metadata.json"
+        with open(metadata_path, 'w') as f:
+            json.dump(frame_metadata, f, indent=2)
+        
+        result = {
+            'status': 'success',
+            'frame_idx': frame_idx,
+            'num_instances': num_instances,
+            'output_dir': str(frame_output_dir),
+            'point_cloud_count': len(point_clouds),
+        }
+        
+        print(f"      ✓ Frame {frame_idx} processed: {num_instances} instances, saved to {frame_output_dir}")
+        return result
+        
+    except Exception as e:
+        print(f"      ❌ Frame {frame_idx} failed: {e}")
+        print(f"      Error details: {traceback.format_exc()}")
+        return {
+            'status': 'failed',
+            'frame_idx': frame_idx,
+            'error': str(e),
+            'output_dir': None,
+        }
+
+
+def process_all_frames(task: str, environment: str, output_dir: Path, 
+                      device: str = 'cuda:0', use_gt_masks: bool = False, max_frames: int = None) -> dict:
+    """
+    Process all frames for a given environment and compute scores.
     
     Args:
         task: Task name
         environment: Environment name
         output_dir: Output directory for results
         device: Device to run on
-        frame_idx: Frame index to process
         use_gt_masks: Whether to use GT masks instead of GroundingSAM
+        max_frames: Maximum number of frames to process (None for all)
+    
+    Returns:
+        dict: Processing results and scores
+    """
+    print(f"  Processing all frames for {task}/{environment}")
+    
+    # Get total frame count
+    total_frames = get_frame_count(task, environment)
+    if max_frames is not None:
+        total_frames = min(total_frames, max_frames)
+    
+    print(f"    Processing {total_frames} frames...")
+    
+    # Create all_frames directory structure
+    all_frames_dir = output_dir / task / environment / "all_frames"
+    all_frames_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Process each frame
+    frame_results = {}
+    frame_scores = {}
+    
+    for frame_idx in range(total_frames):
+        try:
+            # Process single frame
+            frame_result = process_single_frame(
+                task, environment, frame_idx, all_frames_dir, device, use_gt_masks
+            )
+            frame_results[f'frame_{frame_idx}'] = frame_result
+            
+            # Compute scores for this frame
+            frame_score = compute_frame_scores(frame_result, all_frames_dir, task, environment)
+            frame_scores[f'frame_{frame_idx}'] = frame_score
+            
+        except Exception as e:
+            print(f"    Error processing frame {frame_idx}: {e}")
+            frame_results[f'frame_{frame_idx}'] = {
+                'status': 'failed',
+                'frame_idx': frame_idx,
+                'error': str(e)
+            }
+            frame_scores[f'frame_{frame_idx}'] = {
+                'processing_success': False,
+                'error': str(e)
+            }
+    
+    # Compute overall statistics
+    successful_frames = sum(1 for r in frame_results.values() if r.get('status') == 'success')
+    total_instances = sum(r.get('num_instances', 0) for r in frame_results.values() if r.get('status') == 'success')
+    avg_instances = total_instances / max(successful_frames, 1)
+    
+    # Compute temporal consistency scores
+    temporal_scores = compute_temporal_consistency(frame_results, frame_scores)
+    
+    # Overall results
+    all_frames_result = {
+        'task': task,
+        'environment': environment,
+        'total_frames': total_frames,
+        'successful_frames': successful_frames,
+        'failed_frames': total_frames - successful_frames,
+        'success_rate': successful_frames / total_frames if total_frames > 0 else 0,
+        'avg_instances_per_frame': avg_instances,
+        'total_instances': total_instances,
+        'frame_results': frame_results,
+        'frame_scores': frame_scores,
+        'temporal_scores': temporal_scores,
+        'output_dir': str(all_frames_dir),
+    }
+    
+    # Save overall results
+    results_file = all_frames_dir / "all_frames_results.json"
+    with open(results_file, 'w') as f:
+        json.dump(all_frames_result, f, indent=2)
+    
+    print(f"    ✓ Processed {successful_frames}/{total_frames} frames successfully")
+    print(f"    📊 Average {avg_instances:.1f} instances per frame, {total_instances} total instances")
+    print(f"    📁 Results saved to {all_frames_dir}")
+    
+    return all_frames_result
+
+
+def compute_temporal_consistency(frame_results: dict, frame_scores: dict) -> dict:
+    """
+    Compute temporal consistency scores across frames.
+    
+    Args:
+        frame_results: Results from all frames
+        frame_scores: Scores from all frames
+    
+    Returns:
+        dict: Temporal consistency metrics
+    """
+    # Extract instance counts over time
+    instance_counts = []
+    point_cloud_counts = []
+    
+    for frame_key in sorted(frame_results.keys(), key=lambda x: int(x.split('_')[1])):
+        result = frame_results[frame_key]
+        if result.get('status') == 'success':
+            instance_counts.append(result.get('num_instances', 0))
+            point_cloud_counts.append(result.get('point_cloud_count', 0))
+    
+    if len(instance_counts) < 2:
+        return {
+            'instance_count_variance': 0,
+            'instance_count_stability': 1.0,
+            'point_cloud_count_variance': 0,
+            'point_cloud_count_stability': 1.0,
+            'temporal_consistency_score': 1.0,
+        }
+    
+    # Compute variance and stability metrics
+    instance_variance = np.var(instance_counts)
+    instance_stability = 1.0 / (1.0 + instance_variance)  # Higher stability = lower variance
+    
+    point_cloud_variance = np.var(point_cloud_counts)
+    point_cloud_stability = 1.0 / (1.0 + point_cloud_variance)
+    
+    # Overall temporal consistency score
+    consistency_score = (instance_stability + point_cloud_stability) / 2
+    
+    return {
+        'instance_count_variance': float(instance_variance),
+        'instance_count_stability': float(instance_stability),
+        'point_cloud_count_variance': float(point_cloud_variance),
+        'point_cloud_count_stability': float(point_cloud_stability),
+        'temporal_consistency_score': float(consistency_score),
+        'instance_counts_over_time': instance_counts,
+        'point_cloud_counts_over_time': point_cloud_counts,
+    }
+
+
+def process_environment(task: str, environment: str, output_dir: Path, 
+                        device: str = 'cuda:0', frame_idx: int = 0, use_gt_masks: bool = False,
+                        process_all_frames_flag: bool = False, max_frames: int = None):
+    """
+    Process a single environment - can process single frame or all frames.
+    
+    Args:
+        task: Task name
+        environment: Environment name
+        output_dir: Output directory for results
+        device: Device to run on
+        frame_idx: Frame index to process (only used if process_all_frames_flag=False)
+        use_gt_masks: Whether to use GT masks instead of GroundingSAM
+        process_all_frames_flag: Whether to process all frames or just one
+        max_frames: Maximum number of frames to process (None for all)
     
     Returns:
         dict: Processing results
     """
-    print(f"  Processing {task}/{environment} (GT masks: {use_gt_masks})")
-    
-
-    # Load data
-    loader = D3FieldsDataLoader()
-    datapoint = loader.load_datapoint(task, environment, frame_idx)
-    
-    # Convert to fusion format
-    obs = convert_to_fusion_format(datapoint)
-    
-    # Get task-specific queries
-    queries = TASK_QUERIES.get(task, ['object', 'robotic arm', 'gripper'])
-    
-    # Real D3Fields processing
-    num_cameras = obs['color'].shape[0]
-    fusion = Fusion(num_cam=num_cameras, device=device, is_data_from_adamanip=True)
-    
-    # Update with observation
-    fusion.update(obs)
-    
-    if use_gt_masks:
-        # Load and apply GT masks
-        gt_masks = load_gt_masks(task, environment, frame_idx, num_cameras)
-        apply_gt_masks_to_fusion_simple(fusion, gt_masks)
+    if process_all_frames_flag:
+        # Process all frames
+        return process_all_frames(task, environment, output_dir, device, use_gt_masks, max_frames)
     else:
-        raise ValueError('use_gt_masks must be True')
-        # Run GroundingSAM segmentation
-        fusion.text_queries_for_inst_mask_no_track(
-            queries=queries,
-            thresholds=DEFAULT_THRESHOLDS,
-            boundaries=DEFAULT_BOUNDARIES,
-            merge_all=False
-        )
-    
-    # Get results
-    num_instances = fusion.get_inst_num()
-    print(f"    Number of instances detected: {num_instances}")
-    
-    # Extract point clouds and features
-    point_clouds = {}
-    features_info = {}
-    
-    # Fix: num_instances includes background, so adjust the range
-    for inst_id in range(1, num_instances):  # Changed from range(1, num_instances + 1)
-        print(f"    Attempting to extract point cloud for instance {inst_id}")
+        # Process single frame (original behavior)
+        print(f"  Processing {task}/{environment} (frame {frame_idx}, GT masks: {use_gt_masks})")
         
-        # Debug: Check if we have depth data and masks
-        print(f"    Debug: fusion has {fusion.num_cam} cameras")
-        if hasattr(fusion, 'curr_obs_torch'):
-            print(f"    Debug: depth shape: {fusion.curr_obs_torch.get('depth', 'No depth').shape if hasattr(fusion.curr_obs_torch.get('depth', None), 'shape') else 'No depth'}")
-            print(f"    Debug: mask shape: {fusion.curr_obs_torch.get('mask', 'No mask').shape if hasattr(fusion.curr_obs_torch.get('mask', None), 'shape') else 'No mask'}")
+        # Load data
+        loader = D3FieldsDataLoader()
+        datapoint = loader.load_datapoint(task, environment, frame_idx)
+        
+        # Convert to fusion format
+        obs = convert_to_fusion_format(datapoint)
+        
+        # Get task-specific queries
+        queries = TASK_QUERIES.get(task, ['object', 'robotic arm', 'gripper'])
+        
+        # Real D3Fields processing
+        num_cameras = obs['color'].shape[0]
+        fusion = Fusion(num_cam=num_cameras, device=device, is_data_from_adamanip=True)
+        
+        # Update with observation
+        fusion.update(obs)
+        
+        if use_gt_masks:
+            # Load and apply GT masks
+            gt_masks = load_gt_masks(task, environment, frame_idx, num_cameras)
+            apply_gt_masks_to_fusion_simple(fusion, gt_masks)
+        else:
+            raise ValueError('use_gt_masks must be True')
+        
+        # Get results
+        num_instances = fusion.get_inst_num()
+        print(f"    Number of instances detected: {num_instances}")
+        
+        # Extract point clouds and features
+        point_clouds = {}
+        features_info = {}
+        
+        for inst_id in range(1, num_instances):
+            print(f"    Attempting to extract point cloud for instance {inst_id}")
             
-            # Check if mask has any non-zero values for this instance
-            if 'mask' in fusion.curr_obs_torch:
-                mask = fusion.curr_obs_torch['mask']
-                if inst_id < mask.shape[-1]:
-                    inst_mask_sum = mask[:, :, :, inst_id].sum()
-                    print(f"    Debug: Instance {inst_id} mask sum: {inst_mask_sum}")
-        
-        pcd = fusion.extract_masked_pcd([inst_id], None)
-        print(f"    Extracted {pcd.shape[0]} points for instance {inst_id}")
-        
-        # If no points extracted, try fallback method
-        if pcd.shape[0] == 0:
-            raise ValueError(f"No points extracted for instance {inst_id}")
-        
-        if pcd.shape[0] > 0:
-            # Convert tensor to numpy if needed
-            pcd_np = pcd.cpu().numpy() if hasattr(pcd, 'cpu') else pcd
-            point_clouds[f'instance_{inst_id}'] = pcd_np
-            # save pcd_np as ply
+            pcd = fusion.extract_masked_pcd([inst_id], None)
+            print(f"    Extracted {pcd.shape[0]} points for instance {inst_id}")
             
+            if pcd.shape[0] == 0:
+                raise ValueError(f"No points extracted for instance {inst_id}")
             
-            # Extract features
-            N = min(100, pcd.shape[0])
-            if N > 0:
-                src_feats_list, src_pts_list, img_list = fusion.select_features_from_pcd(
-                    pcd_np, N=N, per_instance=True, vis=False
-                )
+            if pcd.shape[0] > 0:
+                # Convert tensor to numpy if needed
+                pcd_np = pcd.cpu().numpy() if hasattr(pcd, 'cpu') else pcd
+                point_clouds[f'instance_{inst_id}'] = pcd_np
                 
-                features_info[f'instance_{inst_id}'] = {
-                    'num_features': len(src_feats_list),
-                    'feature_dims': [f.shape for f in src_feats_list] if src_feats_list else [],
-                    'num_points': N
-                }
-    
-    print(f"    Successfully extracted point clouds for {len(point_clouds)} instances")
-    
-    # # Save point clouds as PLY files
-
-    save_point_clouds_as_ply(point_clouds, output_dir, task, environment)
-
-    
-    # Create and save 3D meshes (mask, feature, color)
-    try:
-        # Use larger step size for faster processing and better mesh extraction
-        used_boundaries, used_step_size = create_meshes_and_save(fusion, output_dir, task, environment, point_clouds=point_clouds, boundaries=None, step_size=None)
-    except Exception as e:
-        print(f"    Warning: Failed to create 3D meshes: {e}")
-        print(f"    Error details: {traceback.format_exc()}")
-        # Fall back to inferred boundaries for other operations
-        used_boundaries, used_step_size = infer_boundaries_and_step(point_clouds or {})
-    
-    # Clean up fusion
-    fusion.close()
-    
-    # Save results
-    env_output_dir = output_dir / task / environment
-    env_output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Save point clouds
-    import numpy as np
-    for inst_id, pcd in point_clouds.items():
-        pcd_path = env_output_dir / f"pointcloud_{inst_id}.npy"
-        np.save(pcd_path, pcd)
-    
-    # Save original images for reference
-    import cv2
-    for cam_id, color_img in enumerate(obs['color']):
-        img_path = env_output_dir / f"camera_{cam_id}_color.png"
-        color_bgr = cv2.cvtColor(color_img, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(str(img_path), color_bgr)
-    
-    # Save metadata
-    metadata = {
-        'task': task,
-        'environment': environment,
-        'frame_idx': frame_idx,
-        'queries': queries,
-        'num_instances': num_instances,
-        'num_cameras': obs['color'].shape[0],
-        'boundaries': used_boundaries,  # Use inferred boundaries
-        'step_size': used_step_size,    # Use inferred step size
-        'default_boundaries': DEFAULT_BOUNDARIES,  # Keep default for reference
-        'thresholds': DEFAULT_THRESHOLDS,
-        'image_shape': obs['color'].shape[1:3],
-        'features_info': features_info,
-        'use_gt_masks': use_gt_masks,
-    }
-    
-    metadata_path = env_output_dir / "d3fields_metadata.json"
-    with open(metadata_path, 'w') as f:
-        json.dump(metadata, f, indent=2)
-    
-    result = {
-        'status': 'success',
-        'num_instances': num_instances,
-        'output_dir': str(env_output_dir),
-    }
-    
-    print(f"    ✓ Found {num_instances} instances, saved to {env_output_dir}")
-    return result
+                # Extract features
+                N = min(100, pcd.shape[0])
+                if N > 0:
+                    src_feats_list, src_pts_list, img_list = fusion.select_features_from_pcd(
+                        pcd_np, N=N, per_instance=True, vis=False
+                    )
+                    
+                    features_info[f'instance_{inst_id}'] = {
+                        'num_features': len(src_feats_list),
+                        'feature_dims': [f.shape for f in src_feats_list] if src_feats_list else [],
+                        'num_points': N
+                    }
         
+        print(f"    Successfully extracted point clouds for {len(point_clouds)} instances")
+        
+        # Save point clouds as PLY files
+        save_point_clouds_as_ply(point_clouds, output_dir, task, environment)
+        
+        # Create and save 3D meshes (mask, feature, color)
+        try:
+            used_boundaries, used_step_size = create_meshes_and_save(fusion, output_dir, task, environment, point_clouds=point_clouds, boundaries=None, step_size=None)
+        except Exception as e:
+            print(f"    Warning: Failed to create 3D meshes: {e}")
+            print(f"    Error details: {traceback.format_exc()}")
+            used_boundaries, used_step_size = infer_boundaries_and_step(point_clouds or {})
+        
+        # Clean up fusion
+        fusion.close()
+        
+        # Save results
+        env_output_dir = output_dir / task / environment
+        env_output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save point clouds
+        import numpy as np
+        for inst_id, pcd in point_clouds.items():
+            pcd_path = env_output_dir / f"pointcloud_{inst_id}.npy"
+            np.save(pcd_path, pcd)
+        
+        # Save original images for reference
+        import cv2
+        for cam_id, color_img in enumerate(obs['color']):
+            img_path = env_output_dir / f"camera_{cam_id}_color.png"
+            color_bgr = cv2.cvtColor(color_img, cv2.COLOR_RGB2BGR)
+            cv2.imwrite(str(img_path), color_bgr)
+        
+        # Save metadata
+        metadata = {
+            'task': task,
+            'environment': environment,
+            'frame_idx': frame_idx,
+            'queries': queries,
+            'num_instances': num_instances,
+            'num_cameras': obs['color'].shape[0],
+            'boundaries': used_boundaries,
+            'step_size': used_step_size,
+            'default_boundaries': DEFAULT_BOUNDARIES,
+            'thresholds': DEFAULT_THRESHOLDS,
+            'image_shape': obs['color'].shape[1:3],
+            'features_info': features_info,
+            'use_gt_masks': use_gt_masks,
+        }
+        
+        metadata_path = env_output_dir / "d3fields_metadata.json"
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+        
+        result = {
+            'status': 'success',
+            'num_instances': num_instances,
+            'output_dir': str(env_output_dir),
+        }
+        
+        print(f"    ✓ Found {num_instances} instances, saved to {env_output_dir}")
+        return result
 
 
 def process_task(task: str, output_dir: Path, max_envs: int = None, 
-                env_types: list = ['grasp', 'manip'], device: str = 'cuda:0', use_gt_masks: bool = False):
+                env_types: list = ['grasp', 'manip'], device: str = 'cuda:0', use_gt_masks: bool = False,
+                process_all_frames_flag: bool = False, max_frames: int = None):
     """
     Process all environments for a given task.
     
@@ -682,11 +1056,13 @@ def process_task(task: str, output_dir: Path, max_envs: int = None,
         env_types: Environment types to process
         device: Device to run on
         use_gt_masks: Whether to use GT masks instead of GroundingSAM
+        process_all_frames_flag: Whether to process all frames or just one
+        max_frames: Maximum number of frames to process (None for all)
     
     Returns:
         dict: Task processing results
     """
-    print(f"\nProcessing task: {task} (GT masks: {use_gt_masks})")
+    print(f"\nProcessing task: {task} (GT masks: {use_gt_masks}, All frames: {process_all_frames_flag})")
     print("-" * 40)
     
     loader = D3FieldsDataLoader()
@@ -702,11 +1078,17 @@ def process_task(task: str, output_dir: Path, max_envs: int = None,
         print(f"  Processing {len(envs)} {env_type} environments...")
         
         for env in envs:
-            env_result = process_environment(task, env, output_dir, device, use_gt_masks=use_gt_masks)
+            env_result = process_environment(
+                task, env, output_dir, device, 
+                frame_idx=0,  # Only used for single frame mode
+                use_gt_masks=use_gt_masks,
+                process_all_frames_flag=process_all_frames_flag,
+                max_frames=max_frames
+            )
             results['environments'][env] = env_result
             results['summary']['total'] += 1
             
-            if env_result['status'] == 'success':
+            if env_result.get('status') == 'success' or env_result.get('successful_frames', 0) > 0:
                 results['summary']['success'] += 1
             else:
                 results['summary']['failed'] += 1
@@ -721,6 +1103,8 @@ def main(output_dir: str = "d3fields_results",
          device: str = 'cuda:0',
          tasks: list = None,
          use_gt_masks: bool = False,
+         process_all_frames_flag: bool = False,
+         max_frames: int = None,
          ):
     """
     Main function to process all tasks in the dataset.
@@ -732,8 +1116,14 @@ def main(output_dir: str = "d3fields_results",
         device: Device to run on
         tasks: Specific tasks to process (None for all)
         use_gt_masks: Whether to use GT masks instead of GroundingSAM
+        process_all_frames_flag: Whether to process all frames or just one
+        max_frames: Maximum number of frames to process (None for all)
     """
     print("🚀 D3Fields Processing for AdaManip Dataset")
+    if process_all_frames_flag:
+        print("📹 Multi-Frame Processing Mode")
+    else:
+        print("📷 Single-Frame Processing Mode")
     print("=" * 60)
     
     # Setup
@@ -754,6 +1144,9 @@ def main(output_dir: str = "d3fields_results",
     print(f"Environment types: {env_types}")
     print(f"Device: {device}")
     print(f"Use GT masks: {use_gt_masks}")
+    print(f"Process all frames: {process_all_frames_flag}")
+    if process_all_frames_flag and max_frames:
+        print(f"Max frames per environment: {max_frames}")
     print(f"Output directory: {output_dir}")
     
     
@@ -764,14 +1157,18 @@ def main(output_dir: str = "d3fields_results",
         'env_types': env_types,
         'device': device,
         'use_gt_masks': use_gt_masks,
+        'process_all_frames': process_all_frames_flag,
+        'max_frames': max_frames,
     }, 'tasks': {}}
     
     total_success = 0
     total_failed = 0
     
     for task in tasks:
-
-        task_results = process_task(task, output_dir, max_envs_per_type, env_types, device, use_gt_masks)
+        task_results = process_task(
+            task, output_dir, max_envs_per_type, env_types, device, 
+            use_gt_masks, process_all_frames_flag, max_frames
+        )
         all_results['tasks'][task] = task_results
         
         # Update totals
@@ -823,6 +1220,12 @@ if __name__ == "__main__":
     parser.add_argument('--quick_test', action='store_true',
                        help='Quick test with 1 environment per task')
     
+    # New arguments for multi-frame processing
+    parser.add_argument('--all_frames', action='store_true',
+                       help='Process all frames instead of just frame 0')
+    parser.add_argument('--max_frames', type=int, default=None,
+                       help='Maximum number of frames to process per environment (None for all)')
+    
     args = parser.parse_args()
     
     # Quick test mode
@@ -831,6 +1234,8 @@ if __name__ == "__main__":
         args.max_envs = 1
         args.env_types = ['grasp']
         args.tasks = ['OpenBottle', 'OpenDoor']
+        if not args.all_frames:
+            print("   Single frame mode (use --all_frames for multi-frame test)")
     
     main(
         output_dir=args.output_dir,
@@ -839,4 +1244,6 @@ if __name__ == "__main__":
         device=args.device,
         tasks=args.tasks,
         use_gt_masks=args.use_gt_masks,
+        process_all_frames_flag=args.all_frames,
+        max_frames=args.max_frames,
     ) 

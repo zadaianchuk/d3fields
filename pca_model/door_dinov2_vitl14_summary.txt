@@ -1,0 +1,6 @@
+PCA Model Summary for door
+Model: dinov2_vitl14
+Feature dimension: 1024
+Number of samples: 16832
+Explained variance ratio: [0.07876564 0.06636842 0.05309462]
+Total explained variance: 0.198
