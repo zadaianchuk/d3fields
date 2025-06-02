@@ -317,16 +317,11 @@ def aggr_point_cloud_from_data(colors, depths, Ks, poses, downsample=True, masks
             mask = masks[i] & (depth > 0) & (depth < th)
         pcd = depth2fgpcd(depth, mask, cam_param, is_data_from_adamanip=is_data_from_adamanip)
         
-        points_homo = np.concatenate([pcd, np.ones((pcd.shape[0], 1))], axis=1)
-
         pose = poses[i]
-        # pose = np.linalg.inv(pose)
-
-        transformed_homo = (pose @ points_homo.T).T
-        trans_pcd = transformed_homo[:, :3]
+        pose = np.linalg.inv(pose)
         # old version not compatible with AdaManip data
-        # trans_pcd = pose @ np.concatenate([pcd.T, np.ones((1, pcd.shape[0]))], axis=0)
-        # trans_pcd = trans_pcd[:3, :].T
+        trans_pcd = pose @ np.concatenate([pcd.T, np.ones((1, pcd.shape[0]))], axis=0)
+        trans_pcd = trans_pcd[:3, :].T
         
         if boundaries is not None:
             x_lower = boundaries['x_lower']
@@ -371,6 +366,7 @@ def aggr_point_cloud_from_data(colors, depths, Ks, poses, downsample=True, masks
             aggr_pcd += pcd
         return aggr_pcd
     else:
+        print(f"pcd sizes: {[pcd.shape[0] for pcd in pcds]}")
         pcds = np.concatenate(pcds, axis=0)
         pcd_colors = np.concatenate(pcd_colors, axis=0)
         return pcds, pcd_colors

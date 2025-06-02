@@ -519,31 +519,36 @@ def opengl2cam(pcd, cam_extrinsic, global_scale):
     # print()
     return cam
 
+def opengl_issac_gym_camera_transform(view_matrix):
+    """
+    Transform the view matrix from OpenGL to OpenCV format. From the ISSAC gym camera transform, compatible with AdaManip data. 
+    Implemented by Leonardo&Andrii
+    """
+    view_matrix = view_matrix.T
+    t = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]])
+    view_matrix[:3, :3] = t @ view_matrix[:3, :3]
+    view_matrix[:3, 3] = t @ view_matrix[:3, 3]
+    # inverse
+    R_opencv = view_matrix[:3, :3].T
+    t_opencv = -R_opencv @ view_matrix[:3, 3]
+    camera_pose = np.eye(4)
+    camera_pose[:3, :3] = R_opencv
+    camera_pose[:3, 3] = t_opencv
+    camera_pose = np.linalg.inv(camera_pose)
+    return camera_pose
+
 def depth2fgpcd(depth, mask, cam_params, is_data_from_adamanip=False):
-    # depth: (h, w)
-    # fgpcd: (n, 3)
-    # mask: (h, w)
-    assert is_data_from_adamanip
     h, w = depth.shape
     mask = np.logical_and(mask, depth > 0)
-    # mask = (depth <= 0.599/0.8)
     fgpcd = np.zeros((mask.sum(), 3))
     fx, fy, cx, cy = cam_params
     pos_x, pos_y = np.meshgrid(np.arange(w), np.arange(h))
     pos_x = pos_x[mask]
     pos_y = pos_y[mask]
-    if is_data_from_adamanip:
-        # see IssakGym  for more details
-        # https://gist.github.com/gavrielstate/8c855eb3b4b1f23e2990bc02c534792e
-        # would be good to figure out how to change extrinsics to the d3field format
-        depth_values = - depth[mask]
-        fgpcd[:, 0] = - (pos_x - cx) * depth_values / fx
-        fgpcd[:, 1] = (pos_y - cy) * depth_values / fy
-        fgpcd[:, 2] = depth_values
-    else:
-        fgpcd[:, 0] = (pos_x - cx) * depth[mask] / fx
-        fgpcd[:, 1] = (pos_y - cy) * depth[mask] / fy
-        fgpcd[:, 2] = depth[mask]
+    
+    fgpcd[:, 0] = (pos_x - cx) * depth[mask] / fx
+    fgpcd[:, 1] = (pos_y - cy) * depth[mask] / fy
+    fgpcd[:, 2] = depth[mask]
     return fgpcd
 
 def pcd2pix(pcd, cam_params, offset=(0, 0)):
