@@ -11,6 +11,7 @@ import cv2
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import shutil
+from utils.my_utils import opengl_issac_gym_camera_transform
 
 
 class D3FieldsDataLoader:
@@ -172,21 +173,18 @@ def convert_to_fusion_format(datapoint: Dict) -> Dict:
     
     K_matrices = []
     pose_matrices = []
-    correct_pose_matrices = []
     for cam_params in datapoint['camera_params']:
         K_matrices.append(cam_params['intrinsics'])
         # Convert world-to-camera to camera-to-world and extract 3x4
-        extrinsics_c2w = np.linalg.inv(cam_params['extrinsics']).T
+        extrinsics_c2w = opengl_issac_gym_camera_transform(cam_params['extrinsics'])
         assert np.allclose(extrinsics_c2w[-1], np.array([0,0,0,1]), rtol=1e-5, atol=1e-5)
         pose_matrices.append(extrinsics_c2w[:3, :])
-        correct_pose_matrices.append((cam_params['extrinsics'].T)[:3, :])
     
     return {
         'color': color,
         'depth': depth,
         'K': np.array(K_matrices),
         'pose': np.array(pose_matrices),
-        "correct_pose": np.array(correct_pose_matrices)
     }
 
 
@@ -260,7 +258,6 @@ def run_tests():
     assert obs['depth'].shape == depth_shape, "Fusion depth shape mismatch"
     assert obs['K'].shape == (num_cameras, 3, 3), f"Fusion K shape wrong: {obs['K'].shape}"
     assert obs['pose'].shape == (num_cameras, 3, 4), f"Fusion pose shape wrong: {obs['pose'].shape}"
-    assert obs['correct_pose'].shape == (3, 4), f"Fusion correct pose shape wrong: {obs['correct_pose'].shape}"
     
     print("✓ Fusion format conversion validated")
     

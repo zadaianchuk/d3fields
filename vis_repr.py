@@ -33,7 +33,7 @@ z_upper = 0.02
 z_lower = -0.2
 
 
-scene = 'open_bottle' # 'mug', 'fork', 'shoe'
+scene = 'open_window' # 'mug', 'fork', 'shoe'
 if scene == 'mug':
     data_path = 'data/2023-09-15-13-21-56-171587' # mug
     pca_path = 'pca_model/mug.pkl'
@@ -49,10 +49,10 @@ elif scene == 'shoe':
     pca_path = 'pca_model/shoe.pkl'
     query_texts = ['shoe']
     query_thresholds = [0.5]
-elif scene == 'open_safe':
-    data_path = '/ssdstore/azadaia/project_snellius_sync/AdaManip/d3fields_datasets/rgbd_manip_OpenSafe_adaptive_8_eps1_clock0.55_env0'
+elif scene == 'open_window':
+    data_path = '/ssdstore/azadaia/project_snellius_sync/d3fields/output/adamanip_d3fields/OpenWindow/grasp_env_0'
     pca_path = 'pca_model/mug.pkl'
-    query_texts = ['safe', "robotic arm"]
+    query_texts = ['window', "robotic arm"]
     query_thresholds = [0.25]
     is_data_from_adamanip = True
 elif scene == 'open_bottle':
@@ -71,7 +71,7 @@ if is_data_from_adamanip:
     x_upper = 1
     x_lower = -1
     y_upper =1
-    y_lower = -1
+    y_lower = 0
     z_upper = 1
     z_lower = 0.1
     
@@ -92,7 +92,27 @@ depths = np.stack([cv2.imread(os.path.join(data_path, f'camera_{i}', 'depth', f'
 
 H, W = colors.shape[1:3]
 
-extrinsics = np.stack([(np.load(os.path.join(data_path, f'camera_{i}', 'camera_extrinsics.npy')).T) for i in range(num_cam)])
+def cam_transform(view_matrix):
+    
+    view_matrix = view_matrix.T
+    t = np.array([[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]])
+    view_matrix[:3, :3] = t @ view_matrix[:3, :3]
+    view_matrix[:3, 3] = t @ view_matrix[:3, 3]
+    # inverse
+    R_opencv = view_matrix[:3, :3].T
+    t_opencv = -R_opencv @ view_matrix[:3, 3]
+    camera_pose = np.eye(4)
+    camera_pose[:3, :3] = R_opencv
+    camera_pose[:3, 3] = t_opencv
+    camera_pose = np.linalg.inv(camera_pose)
+    return camera_pose
+
+
+if is_data_from_adamanip:
+    extrinsics = np.stack([(cam_transform(np.load(os.path.join(data_path, f'camera_{i}', 'camera_extrinsics.npy')))) for i in range(num_cam)])
+else:
+    extrinsics = np.stack([(np.load(os.path.join(data_path, f'camera_{i}', 'camera_extrinsics.npy'))) for i in range(num_cam)])
+
 cam_param = np.stack([np.load(os.path.join(data_path, f'camera_{i}', 'camera_params.npy')) for i in range(num_cam)])
 print("cam_param: ", cam_param)
 intrinsics = np.zeros((num_cam, 3, 3))
@@ -102,27 +122,28 @@ intrinsics[:, 0, 2] = cam_param[:, 2]
 intrinsics[:, 1, 2] = cam_param[:, 3]
 intrinsics[:, 2, 2] = 1
 
-assert np.all(extrinsics[:, -1] == np.array([[0,0,0,1]]))
+# assert np.allclose(extrinsics[:, -1], np.array([[0,0,0,1]]))
 
 obs = {
     'color': colors,
     'depth': depths,
     'pose': extrinsics[:, :3], # (N, 3, 4)
+    'correct_pose': extrinsics[:, :3], # (N, 3, 4)
     'K': intrinsics,
 }
 
-# pcd = aggr_point_cloud_from_data(colors[..., ::-1], 
-#                                  depths, 
-#                                  intrinsics, 
-#                                  extrinsics, 
-#                                  downsample=True, 
-#                                  boundaries=boundaries, 
-#                                  is_data_from_adamanip=is_data_from_adamanip)
+pcd = aggr_point_cloud_from_data(colors[..., ::-1], 
+                                 depths, 
+                                 intrinsics, 
+                                 extrinsics, 
+                                 downsample=True, 
+                                 boundaries=boundaries, 
+                                 is_data_from_adamanip=is_data_from_adamanip)
 
-# pcd.remove_statistical_outlier(nb_neighbors=5, std_ratio=0.2)
+pcd.remove_statistical_outlier(nb_neighbors=5, std_ratio=0.2)
 
 # save pcd
-# o3d.io.write_point_cloud(f'{output_dir}/pcd_{scene}.ply', pcd)
+o3d.io.write_point_cloud(f'{output_dir}/pcd_{scene}.ply', pcd)
 print(f'Saved pcd to {output_dir}/pcd_{scene}.ply')
 
 

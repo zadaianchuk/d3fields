@@ -320,16 +320,9 @@ class Fusion():
         assert pts.shape[1] == 3
         
         # transform pts to camera pixel coords and get the depth
-        pts_2d, valid_mask, pts_depth = project_points_coords(pts, self.curr_obs_torch['correct_pose'], self.curr_obs_torch['K'])
+        pts_2d, valid_mask, pts_depth = project_points_coords(pts, self.curr_obs_torch['pose'], self.curr_obs_torch['K'])
         pts_depth = pts_depth[...,0] # [rfn,pn]
-        
-        # get interpolated depth and features
-        if self.is_data_from_adamanip:
-            depth_multiplier = -1
-
-        else:
-            depth_multiplier = 1
-        inter_depth = interpolate_feats(depth_multiplier * self.curr_obs_torch['depth'].unsqueeze(1),
+        inter_depth = interpolate_feats(self.curr_obs_torch['depth'].unsqueeze(1),
                                         pts_2d,
                                         h = self.H,
                                         w = self.W,
@@ -338,9 +331,9 @@ class Fusion():
                                         inter_mode='nearest')[...,0] # [rfn,pn,1]
         
         # compute the distance to the closest point on the surface
-        dist = depth_multiplier * (inter_depth - pts_depth) # [rfn,pn]
+        dist = (inter_depth -  pts_depth) # [rfn,pn]
         
-        #TODO (Andrii): check if this make sense
+        #TODO (Andrii): check if this make sense or it should be > 0 
         dist_valid = (inter_depth < 2.5) & valid_mask & (dist > -self.mu) # [rfn,pn]
         
         # distance-based weight
@@ -566,7 +559,7 @@ class Fusion():
         self.curr_obs_torch['color_tensor'] = torch.from_numpy(color).to(self.device, dtype=self.dtype) / 255.0
         self.curr_obs_torch['depth'] = torch.from_numpy(obs['depth']).to(self.device, dtype=self.dtype)
         self.curr_obs_torch['pose'] = torch.from_numpy(obs['pose']).to(self.device, dtype=self.dtype)
-        self.curr_obs_torch['correct_pose'] = torch.from_numpy(obs['correct_pose']).to(self.device, dtype=self.dtype)
+        self.curr_obs_torch['correct_pose'] = torch.from_numpy(obs['pose']).to(self.device, dtype=self.dtype)
         self.curr_obs_torch['K'] = torch.from_numpy(obs['K']).to(self.device, dtype=self.dtype)
         
         _, self.H, self.W = obs['depth'].shape
@@ -973,7 +966,7 @@ class Fusion():
         mask_confs = []
         for i in range(self.num_cam):
             # mask, label = grounded_instance_sam_bacth_queries_np(self.curr_obs_torch['color'][i], queries, self.ground_dino_model, self.sam_model, thresholds, merge_all)
-            mask, label, mask_conf = grounded_instance_sam_new_ver(self.curr_obs_torch['color'][i], queries, self.ground_dino_model, self.sam_model, thresholds, merge_all, device=self.device, cam_idx=i)
+            mask, label, mask_conf = grounded_instance_sam_new_ver(self.curr_obs_torch['color'][i], queries, self.ground_dino_model, self.sam_model, thresholds, merge_all, device=self.device)
             
             # filter out the mask close to robot_pcd
             if robot_pcd is not None:
@@ -1038,7 +1031,7 @@ class Fusion():
             labels = []
             mask_confs = []
             for i in range(self.num_cam):
-                mask, label, mask_conf = grounded_instance_sam_new_ver(self.curr_obs_torch['color'][i], queries, self.ground_dino_model, self.sam_model, thresholds, merge_all, device=self.device, cam_idx=i)
+                mask, label, mask_conf = grounded_instance_sam_new_ver(self.curr_obs_torch['color'][i], queries, self.ground_dino_model, self.sam_model, thresholds, merge_all, device=self.device)
                 
                 # filter out the mask close to robot_pcd
                 if robot_pcd is not None:

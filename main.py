@@ -33,7 +33,7 @@ TASK_QUERIES = {
 DEFAULT_BOUNDARIES = {
     'x_lower': -1, 'x_upper': 1,
     'y_lower': -1, 'y_upper': 1,
-    'z_lower': 0.1, 'z_upper': 0.5
+    'z_lower': 0.1, 'z_upper': 1
 }
 
 # Default segmentation thresholds
@@ -281,7 +281,6 @@ def create_meshes_and_save(fusion, output_dir: Path, task: str, environment: str
     
     with torch.no_grad():
         vertex_out = fusion.batch_eval(vertices_tensor, return_names=['dino_feats', 'mask', 'color_tensor'])
-    
     # Create output directory for meshes
     mesh_output_dir = output_dir / task / environment
     mesh_output_dir.mkdir(parents=True, exist_ok=True)
@@ -697,7 +696,7 @@ def process_task(task: str, output_dir: Path, max_envs: int = None,
     
     for env_type in env_types:
         envs = environments.get(env_type, [])
-        if max_envs:
+        if max_envs != -1:
             envs = envs[:max_envs]
         
         print(f"  Processing {len(envs)} {env_type} environments...")
@@ -810,7 +809,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Compute D3Fields for AdaManip dataset')
     parser.add_argument('--output_dir', type=str, default='output/d3fields_results',
                        help='Output directory for results')
-    parser.add_argument('--max_envs', type=int, default=3,
+    parser.add_argument('--max_envs', type=int, default=-1,
                        help='Maximum environments per type to process')
     parser.add_argument('--env_types', nargs='+', default=['grasp', 'manip'],
                        choices=['grasp', 'manip'],
